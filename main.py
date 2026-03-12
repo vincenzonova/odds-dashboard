@@ -16,16 +16,16 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bet9ja_scraper import scrape_bet9ja
-from sportybet_scraper import scrape_sportybet
+from sportybet_scraper import scrape_sportybet, fuzzy_match
 from dashboard import build_dashboard_html
 
-# ── Config ────────────────────────────────────────────────
+# ── Config ────────────────────────────────────────────────────────
 REFRESH_MINUTES = int(os.getenv("REFRESH_MINUTES", "10"))
 MAX_MATCHES     = int(os.getenv("MAX_MATCHES", "40"))
 
-# ── In-memory cache ───────────────────────────────────────
+# ── In-memory cache ───────────────────────────────────────────────
 cache: dict = {
-    "rows":         [],      # list of comparison rows
+    "rows":         [],
     "last_updated": None,
     "status":       "Initialising…",
     "is_refreshing": False,
@@ -34,9 +34,23 @@ cache: dict = {
 scheduler = AsyncIOScheduler()
 
 
-# ── Scrape + merge logic ──────────────────────────────────
+def _build_sportybet_map(bet9ja_matches: list[dict], sb_events: list[dict]) -> dict:
+    """Fuzzy-match SportyBet events to Bet9ja events, return {event_name: odds}."""
+    sb_map = {}
+    for b9 in bet9ja_matches:
+        event_name = b9["event"]
+        best_match = None
+        best_score = 0.0
+        for sb in sb_events:
+            if fuzzy_match(event_name, sb["event"]):
+                sb_map[event_name] = sb.get("odds", {})
+                break
+        else:
+            sb_map[event_name] = {}
+    return sb_map
 
-def merge_odds(bet9ja_matches: list[dict], sportybet_map: dict[str, dict]) -> list[dict]:
+
+def merge_odds(bet9ja_matches: list[dict], sportybet_map: dict) -> list[dict]:
     """
     Combine Bet9ja and SportyBet odds into comparison rows.
     Each row = one market/sign combination per match.
@@ -44,8 +58,7 @@ def merge_odds(bet9ja_matches: list[dict], sportybet_map: dict[str, dict]) -> li
     MARKETS = [
         ("1X2",    ["1", "X", "2"]),
         ("O/U 2.5",["Over", "Under"]),
-        ("O/U 1.5",["Over"]),
-        ("GG/NG",  ["GG"]),
+        ("Double Chance", ["1X", "12", "X2"]),
     ]
 
     rows = []
@@ -61,9 +74,8 @@ def merge_odds(bet9ja_matches: list[dict], sportybet_map: dict[str, dict]) -> li
                 sb_val = sb_odds.get(market, {}).get(sign, "")
 
                 if not b9_val and not sb_val:
-                    continue  # skip if neither bookie has it
+                    continue
 
-                # Compute numeric diff
                 diff = None
                 try:
                     b9_f  = float(b9_val)
@@ -82,7 +94,6 @@ def merge_odds(bet9ja_matches: list[dict], sportybet_map: dict[str, dict]) -> li
                     "diff":      diff,
                 })
 
-    # Sort: biggest positive diff first (SportyBet better), then by league
     rows.sort(key=lambda r: (-(r["diff"] or 0), r["league"], r["event"]))
     return rows
 
@@ -104,8 +115,9 @@ async def do_refresh():
             cache["status"] = "No matches found from Bet9ja"
             return
 
-        # SportyBet (API)
-        sportybet_map = scrape_sportybet(bet9ja_matches)
+        # SportyBet (API) — fetch independently then fuzzy-match
+        sb_events = scrape_sportybet(max_matches=MAX_MATCHES)
+        sportybet_map = _build_sportybet_map(bet9ja_matches, sb_events)
 
         # Merge
         rows = merge_odds(bet9ja_matches, sportybet_map)
@@ -122,23 +134,21 @@ async def do_refresh():
         cache["is_refreshing"] = False
 
 
-# ── App lifecycle ─────────────────────────────────────────
+# ── App lifecycle ─────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: initial scrape + schedule
     asyncio.create_task(do_refresh())
     scheduler.add_job(do_refresh, "interval", minutes=REFRESH_MINUTES)
     scheduler.start()
     yield
-    # Shutdown
     scheduler.shutdown()
 
 
 app = FastAPI(title="Odds Dashboard", lifespan=lifespan)
 
 
-# ── Routes ────────────────────────────────────────────────
+# ── Routes ────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
@@ -157,7 +167,6 @@ async def api_odds():
 
 @app.get("/api/refresh")
 async def trigger_refresh():
-    """Manually trigger a refresh (useful for testing)."""
     asyncio.create_task(do_refresh())
     return {"message": "Refresh triggered"}
 
