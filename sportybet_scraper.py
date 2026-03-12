@@ -1,204 +1,158 @@
 """
-SportyBet Scraper
------------------
-Uses SportyBet's public REST API to fetch odds.
-Works automatically when the server is hosted in Nigeria or with a NG VPN.
-Falls back gracefully when geo-blocked.
+SportyBet Scraper — fetches odds via the pcEvents POST API.
+No browser needed; pure HTTP requests.
 """
-
 import requests
 from difflib import SequenceMatcher
-import re
 
-SPORTY_BASE = "https://www.sportybet.com/api/ng"
+SPORTYBET_BASE = "https://www.sportybet.com"
+
+# Step 1: get popular tournament IDs
+SPORT_LIST_URL = f"{SPORTYBET_BASE}/api/ng/factsCenter/popularAndSportList?sportId=sr:sport:1"
+
+# Step 2: fetch events for each tournament
+PC_EVENTS_URL = f"{SPORTYBET_BASE}/api/ng/factsCenter/pcEvents"
+
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    "Referer":    "https://www.sportybet.com/ng/",
-    "Accept":     "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+    "Referer": "https://www.sportybet.com/ng/",
+    "Origin": "https://www.sportybet.com",
 }
 
-# SportyBet tournament IDs for popular leagues
-TOURNAMENT_IDS = {
-    "England Premier League":    "sr:tournament:17",
-    "UEFA Europa League":        "sr:tournament:679",
-    "UEFA Conference League":    "sr:tournament:929",
-    "Italy Serie A":             "sr:tournament:23",
-    "Spain LaLiga":              "sr:tournament:8",
-    "UEFA Champions League":     "sr:tournament:7",
-    "Bundesliga":                "sr:tournament:35",
-    "Ligue 1":                   "sr:tournament:34",
-    "Featured":                  None,
+MARKET_IDS = {
+    1: "1X2",
+    18: "O/U 2.5",
+    10: "Double Chance",
 }
 
-MARKET_IDS = "1,18,29"
-
-OUTCOME_MAP = {
-    "1": "1",  "Home": "1",
-    "X": "X",  "Draw": "X",
-    "2": "2",  "Away": "2",
-    "Over": "Over",
-    "Under": "Under",
-    "Yes": "GG",  "No": "NG",
-}
-
-
-def _similar(a: str, b: str) -> float:
-    a = re.sub(r'[^a-z0-9 ]', '', a.lower())
-    b = re.sub(r'[^a-z0-9 ]', '', b.lower())
-    return SequenceMatcher(None, a, b).ratio()
-
-
-def _parse_market_name(name: str) -> str:
-    n = name.lower()
-    if "match winner" in n or "1x2" in n or "full time" in n:
-        return "1X2"
-    if "over/under" in n or "total goals" in n:
-        m = re.search(r'(\d+\.?\d*)', n)
-        if m:
-            val = m.group(1)
-            if val == "1.5": return "O/U 1.5"
-            if val == "2.5": return "O/U 2.5"
-            if val == "3.5": return "O/U 3.5"
-            return f"O/U {val}"
-    if "both teams" in n or "btts" in n or "gg" in n:
-        return "GG/NG"
-    return name
-
-
-def fetch_popular_events() -> list[dict]:
+def _get_tournament_ids(limit: int = 12) -> list[str]:
+    """Fetch popular tournament IDs from SportyBet."""
     try:
-        r = requests.get(
-            f"{SPORTY_BASE}/factsCenter/popularEvents",
-            params={"sport": "sr:sport:1", "_t": "1"},
-            headers=HEADERS, timeout=10
-        )
-        if r.status_code != 200:
-            return []
-        return r.json().get("data", {}).get("events", [])
+        r = requests.get(SPORT_LIST_URL, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        tournaments = []
+        for group in data.get("data", {}).get("popular", []):
+            tid = group.get("id", "")
+            if tid.startswith("sr:tournament:"):
+                tournaments.append(tid)
+            if len(tournaments) >= limit:
+                break
+        print(f"  [SportyBet] Found {len(tournaments)} tournaments")
+        return tournaments
     except Exception as e:
-        print(f"  [SportyBet] Popular events error: {e}")
+        print(f"  [SportyBet] Error fetching tournament list: {e}")
+        return [
+            "sr:tournament:17",   # Premier League
+            "sr:tournament:8",    # La Liga
+            "sr:tournament:23",   # Serie A
+            "sr:tournament:35",   # Bundesliga
+            "sr:tournament:34",   # Ligue 1
+        ]
+
+def _fetch_tournament_events(tournament_id: str) -> list[dict]:
+    """Fetch events for a single tournament using pcEvents POST."""
+    payload = {
+        "sportId": "sr:sport:1",
+        "tournamentId": tournament_id,
+    }
+    try:
+        r = requests.post(PC_EVENTS_URL, json=payload, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+
+        if data.get("bizCode") != 10000:
+            print(f"  [SportyBet] API error for {tournament_id}: {data.get('message')}")
+            return []
+
+        events = []
+        for item in data.get("data", {}).get("events", []):
+            event_name = item.get("homeTeamName", "") + " vs " + item.get("awayTeamName", "")
+            event_id = item.get("eventId", "")
+            league = item.get("tournamentName", "")
+
+            odds = {}
+            for market in item.get("markets", []):
+                market_id = market.get("marketId")
+                market_name = MARKET_IDS.get(market_id)
+                if not market_name:
+                    mn = market.get("name", "").lower()
+                    if "1x2" in mn:
+                        market_name = "1X2"
+                    elif "over" in mn or "under" in mn:
+                        market_name = "O/U 2.5"
+                    elif "double" in mn:
+                        market_name = "Double Chance"
+                    else:
+                        continue
+
+                market_odds = {}
+                for outcome in market.get("outcomes", []):
+                    desc = outcome.get("desc", "")
+                    odd_val = outcome.get("odds", "")
+                    if desc and odd_val:
+                        try:
+                            if isinstance(odd_val, (int, float)):
+                                odd_val = f"{odd_val / 100:.2f}" if odd_val > 50 else str(odd_val)
+                            elif isinstance(odd_val, str) and odd_val.replace('.','',1).isdigit():
+                                v = float(odd_val)
+                                if v > 50:
+                                    odd_val = f"{v / 100:.2f}"
+                        except (ValueError, TypeError):
+                            pass
+                        market_odds[desc] = str(odd_val)
+
+                if market_odds:
+                    odds[market_name] = market_odds
+
+            if odds:
+                events.append({
+                    "event_id": event_id,
+                    "event": event_name,
+                    "league": league,
+                    "odds": odds,
+                })
+
+        return events
+
+    except Exception as e:
+        print(f"  [SportyBet] Error fetching {tournament_id}: {e}")
         return []
 
+def scrape_sportybet(max_matches: int = 50) -> list[dict]:
+    """Main entry point — fetch odds from SportyBet."""
+    print("  [SportyBet] Starting scrape...")
+    tournament_ids = _get_tournament_ids()
+    results = []
+    seen = set()
 
-def fetch_tournament_events(tournament_id: str) -> list[dict]:
-    try:
-        r = requests.get(
-            f"{SPORTY_BASE}/factsCenter/tourEvents",
-            params={"tournamentId": tournament_id, "marketId": MARKET_IDS, "_t": "1"},
-            headers=HEADERS, timeout=10
-        )
-        if r.status_code != 200:
-            return []
-        data = r.json().get("data", {})
-        return data.get("events", []) or data.get("matches", [])
-    except Exception as e:
-        print(f"  [SportyBet] Tournament {tournament_id} error: {e}")
-        return []
+    for tid in tournament_ids:
+        if len(results) >= max_matches:
+            break
+        events = _fetch_tournament_events(tid)
+        for ev in events:
+            eid = ev["event_id"]
+            if eid in seen:
+                continue
+            seen.add(eid)
+            results.append(ev)
+            if len(results) >= max_matches:
+                break
+        print(f"  [SportyBet] {tid}: +{len(events)} events")
 
-
-def fetch_match_odds(event_id: str) -> dict:
-    try:
-        r = requests.get(
-            f"{SPORTY_BASE}/factsCenter/matchDetails",
-            params={"matchId": event_id, "marketId": MARKET_IDS},
-            headers=HEADERS, timeout=10
-        )
-        if r.status_code != 200:
-            return {}
-        data = r.json().get("data", {})
-        markets_raw = data.get("markets", [])
-    except Exception as e:
-        print(f"  [SportyBet] Match {event_id} error: {e}")
-        return {}
-
-    odds = {}
-    for market in markets_raw:
-        mname = _parse_market_name(market.get("marketName", ""))
-        if not mname:
-            continue
-        odds[mname] = {}
-        for outcome in market.get("outcomes", []):
-            raw_sign = outcome.get("outcomeName", "")
-            sign = OUTCOME_MAP.get(raw_sign, raw_sign)
-            val = outcome.get("odds") or outcome.get("probability")
-            if sign and val:
-                odds[mname][sign] = str(val)
-    return odds
-
-
-def _events_from_raw(raw_events: list) -> list[dict]:
-    out = []
-    for ev in raw_events:
-        event_id = str(ev.get("eventId") or ev.get("matchId") or "")
-        home = ev.get("homeTeamName") or ev.get("home", "")
-        away = ev.get("awayTeamName") or ev.get("away", "")
-        if not event_id or not home:
-            continue
-        name = f"{home} - {away}" if away else home
-        tournament = ev.get("tournamentName") or ev.get("leagueName") or ""
-        inline_odds = {}
-        for market in ev.get("markets", []):
-            mname = _parse_market_name(market.get("marketName", ""))
-            inline_odds[mname] = {}
-            for outcome in market.get("outcomes", []):
-                sign = OUTCOME_MAP.get(outcome.get("outcomeName", ""), outcome.get("outcomeName", ""))
-                val = outcome.get("odds")
-                if sign and val:
-                    inline_odds[mname][sign] = str(val)
-        out.append({
-            "event_id":   event_id,
-            "event":      name,
-            "league":     tournament,
-            "odds":       inline_odds,
-        })
-    return out
-
-
-def find_sportybet_match(target_event: str, sb_events: list[dict]) -> dict | None:
-    best_score = 0.0
-    best = None
-    for ev in sb_events:
-        score = _similar(target_event, ev["event"])
-        if score > best_score:
-            best_score = score
-            best = ev
-    if best_score >= 0.55:
-        return best
-    return None
-
-
-def scrape_sportybet(bet9ja_matches: list[dict]) -> dict[str, dict]:
-    print("  [SportyBet] Fetching featured events...")
-    sb_events = []
-    pop = fetch_popular_events()
-    sb_events.extend(_events_from_raw(pop))
-    for league, tid in TOURNAMENT_IDS.items():
-        if tid is None:
-            continue
-        tour_events = fetch_tournament_events(tid)
-        sb_events.extend(_events_from_raw(tour_events))
-    if not sb_events:
-        print("  [SportyBet] No events returned — geo-blocked or API changed.")
-        return {}
-    print(f"  [SportyBet] Got {len(sb_events)} events from API")
-    results = {}
-    for match in bet9ja_matches:
-        event_name = match["event"]
-        sb_match = find_sportybet_match(event_name, sb_events)
-        if not sb_match:
-            print(f"  [SportyBet] No match for: {event_name}")
-            results[event_name] = {}
-            continue
-        odds = sb_match["odds"]
-        if not odds.get("1X2"):
-            odds = fetch_match_odds(sb_match["event_id"])
-        print(f"  [SportyBet] Matched '{event_name}' → '{sb_match['event']}'")
-        results[event_name] = odds
+    print(f"  [SportyBet] Done — {len(results)} matches total")
     return results
+
+
+def fuzzy_match(name_a: str, name_b: str, threshold: float = 0.55) -> bool:
+    a = name_a.lower().strip()
+    b = name_b.lower().strip()
+    return SequenceMatcher(None, a, b).ratio() >= threshold
 
 
 if __name__ == "__main__":
     import json
-    test = [{"event": "Arsenal - Everton"}, {"event": "Napoli - Lecce"}]
-    data = scrape_sportybet(test)
+    data = scrape_sportybet(max_matches=10)
     print(json.dumps(data, indent=2))
