@@ -1,188 +1,110 @@
 """
-Bet9ja Scraper
---------------
-Uses Playwright (headless Chromium) to:
-  1. Discover today's top matches from the Bet9ja homepage tabs
-     (Premier League, Europa League, Serie A, LaLiga, etc.)
-  2. For each match, extract 1X2, O/U 1.5, O/U 2.5, and BTTS odds
+Bet9ja Scraper — extracts odds directly from the homepage Top Bets section.
+Uses Playwright headless Chromium to render the AngularJS page.
 """
-
 import asyncio
-import re
-from playwright.async_api import async_playwright, Page
+from playwright.async_api import async_playwright
 
-BET9JA_BASE = "https://web.bet9ja.com"
+BET9JA_URL = "https://web.bet9ja.com/Sport/"
 
-# Tab labels on the Bet9ja homepage → league names
-LEAGUE_TABS = {
-    "Premier League":           "England Premier League",
-    "UEFA Europa ...":          "UEFA Europa League",
-    "UEFA Confere...": "UEFA Conference League",
-    "Serie A":                  "Italy Serie A",
-    "LaLiga":                   "Spain LaLiga",
-    "UEFA Champi...":           "UEFA Champions League",
-    "Germany Bundesliga":       "Bundesliga",
-    "France Ligue 1":           "Ligue 1",
+# Map sign names to market buckets
+SIGN_TO_MARKET = {
+    "1": "1X2", "X": "1X2", "2": "1X2",
+    "1X": "Double Chance", "12": "Double Chance", "X2": "Double Chance",
+    "Over": "O/U 2.5", "Under": "O/U 2.5",
 }
 
-# Markets to extract per match
-MARKETS_TO_FETCH = [
-    ("1X2",    "1"),
-    ("1X2",    "X"),
-    ("1X2",    "2"),
-    ("O/U 2.5","Over"),
-    ("O/U 2.5","Under"),
-    ("O/U 1.5","Over"),
-    ("GG/NG",  "GG"),
-]
-
-JS_EXTRACT_ODDS = """
+JS_EXTRACT = """
 () => {
-    const result = {};
-    const items = document.querySelectorAll('.SEItem.ng-scope');
-    for (const item of items) {
-        const lines = item.innerText.trim().split('\\n').map(l => l.trim()).filter(Boolean);
-        const market = lines[0];
-        if (!market) continue;
-        result[market] = {};
-        for (const odd of item.querySelectorAll('.SEOdd')) {
-            const sign  = odd.querySelector('.SEOddsTQ')?.innerText?.trim();
-            const value = odd.querySelector('.SEOddLnk')?.innerText?.trim();
-            if (sign && value) result[market][sign] = value;
+    const matches = [];
+    const links = document.querySelectorAll('a[is-link-subevent]');
+    for (const link of links) {
+        const name = link.innerText.trim();
+        const sid = (link.href.match(/SubEventID=(\d+)/) || [])[1] || '';
+        const row = link.parentElement?.parentElement;
+        if (!row) continue;
+        const rawOdds = {};
+        for (const item of row.querySelectorAll('.odd')) {
+            const sign = item.querySelector('.type')?.innerText?.trim();
+            const val  = item.querySelector('.QuotaValore')?.innerText?.trim();
+            if (sign && val) rawOdds[sign] = val;
         }
+        matches.push({ name, sid, rawOdds });
     }
-    return result;
-}
-"""
-
-JS_GET_SUBEVENT_LINKS = """
-() => {
-    const links = document.querySelectorAll('a[href*="SubEventDetail"]');
-    return [...new Set(
-        Array.from(links)
-            .map(a => a.href)
-            .filter(h => h.includes('SubEventID='))
-    )].map(href => ({
-        href,
-        id: href.split('SubEventID=')[1]?.split('&')[0],
-        text: document.querySelector(`a[href="${href.replace(location.origin,'')}"]`)?.innerText?.trim() || ''
-    }));
+    return matches;
 }
 """
 
 
-async def get_match_odds(page: Page, subevent_id: str) -> dict:
-    """Navigate to a match detail page and return all odds."""
-    url = f"{BET9JA_BASE}/Sport/SubEventDetail?SubEventID={subevent_id}"
-    try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=20000)
-        await page.wait_for_selector(".SEItem.ng-scope", timeout=12000)
-        return await page.evaluate(JS_EXTRACT_ODDS)
-    except Exception as e:
-        print(f"  [Bet9ja] Error fetching SubEventID={subevent_id}: {e}")
-        return {}
-
-
-async def discover_top_matches(page: Page) -> list[dict]:
-    """
-    Visit Bet9ja homepage and collect today's featured matches
-    across all major league tabs. Returns list of match dicts.
-    """
-    matches = []
-    seen_ids = set()
-
-    await page.goto(f"{BET9JA_BASE}/Sport/", wait_until="domcontentloaded", timeout=20000)
-    await page.wait_for_selector(".TopBet, [class*='TopBet'], a[href*='SubEventDetail']", timeout=10000)
-
-    # Get all visible tab buttons in the TOP BETS section
-    tab_buttons = await page.query_selector_all(".TopBetGroup a, .TopBetTabGroup a, a[class*='tab'], .bet-tab")
-    if not tab_buttons:
-        tab_buttons = await page.query_selector_all("td a[href='#'], .tab-link, [class*='league-tab']")
-
-    # Also collect from the currently visible default tab
-    links_data = await page.evaluate(JS_GET_SUBEVENT_LINKS)
-    for item in links_data:
-        sid = item.get("id")
-        if sid and sid not in seen_ids:
-            seen_ids.add(sid)
-            matches.append({
-                "subevent_id": sid,
-                "event": item.get("text", ""),
-                "league": "Featured",
-                "href": item.get("href", ""),
-            })
-
-    # Click each tab and collect matches
-    for tab_text, league_name in LEAGUE_TABS.items():
-        try:
-            tab = await page.query_selector(f"text='{tab_text}'")
-            if not tab:
-                tab = await page.query_selector(f"a:has-text('{tab_text[:8]}')")
-            if tab:
-                await tab.click()
-                await page.wait_for_timeout(800)
-                links_data = await page.evaluate(JS_GET_SUBEVENT_LINKS)
-                for item in links_data:
-                    sid = item.get("id")
-                    if sid and sid not in seen_ids:
-                        seen_ids.add(sid)
-                        matches.append({
-                            "subevent_id": sid,
-                            "event": item.get("text", ""),
-                            "league": league_name,
-                            "href": item.get("href", ""),
-                        })
-        except Exception as e:
-            print(f"  [Bet9ja] Could not click tab '{tab_text}': {e}")
+def _bucket_odds(raw: dict) -> dict:
+    """Sort raw sign→value pairs into market buckets."""
+    buckets = {}
+    for sign, val in raw.items():
+        market = SIGN_TO_MARKET.get(sign)
+        if not market:
             continue
+        buckets.setdefault(market, {})[sign] = val
+    return buckets
 
-    print(f"  [Bet9ja] Discovered {len(matches)} featured matches")
-    return matches
 
-
-async def scrape_bet9ja(max_matches: int = 40) -> list[dict]:
-    """
-    Main entry point. Returns list of match odds dicts:
-    {
-      subevent_id, event, league,
-      odds: { "1X2": {"1": "1.50", "X": "4.00", "2": "6.00"}, "O/U 2.5": {...}, ... }
-    }
-    """
+async def scrape_bet9ja(max_matches: int = 50) -> list[dict]:
     results = []
+    seen_ids = set()
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
         page = await browser.new_page()
-
-        # Suppress images/fonts for speed
         await page.route("**/*.{png,jpg,jpeg,gif,webp,woff,woff2,svg}", lambda r: r.abort())
 
-        print("  [Bet9ja] Discovering top matches...")
-        matches = await discover_top_matches(page)
-        matches = matches[:max_matches]
+        print("  [Bet9ja] Loading homepage...")
+        await page.goto(BET9JA_URL, wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_selector("a[is-link-subevent]", timeout=15000)
 
-        for i, match in enumerate(matches):
-            sid = match["subevent_id"]
-            print(f"  [Bet9ja] ({i+1}/{len(matches)}) {match['event'] or sid}")
-            odds = await get_match_odds(page, sid)
-            if odds:
-                results.append({
-                    "subevent_id": sid,
-                    "event":  match["event"],
-                    "league": match["league"],
-                    "odds":   odds,
-                })
+        # Discover league tabs
+        tabs = await page.query_selector_all('[ng-repeat="evento in getEvents()"]')
+        print(f"  [Bet9ja] Found {len(tabs)} league tabs")
+
+        for i, tab in enumerate(tabs):
+            if len(results) >= max_matches:
+                break
+            try:
+                league = (await tab.inner_text()).strip().replace("\n", " ")
+                await tab.click()
+                await page.wait_for_timeout(900)
+                await page.wait_for_selector("a[is-link-subevent]", timeout=8000)
+            except Exception as e:
+                print(f"  [Bet9ja] Tab {i} error: {e}")
+                continue
+
+            raw_matches = await page.evaluate(JS_EXTRACT)
+            added = 0
+            for m in raw_matches:
+                if m["sid"] in seen_ids or not m["name"]:
+                    continue
+                seen_ids.add(m["sid"])
+                odds = _bucket_odds(m["rawOdds"])
+                if odds:
+                    results.append({
+                        "subevent_id": m["sid"],
+                        "event": m["name"],
+                        "league": league,
+                        "odds": odds,
+                    })
+                    added += 1
+                if len(results) >= max_matches:
+                    break
+            print(f"  [Bet9ja] {league}: +{added} matches")
 
         await browser.close()
 
-    print(f"  [Bet9ja] Done — {len(results)} matches with odds")
+    print(f"  [Bet9ja] Done — {len(results)} matches total")
     return results
 
 
 if __name__ == "__main__":
     import json
-    data = asyncio.run(scrape_bet9ja(max_matches=5))
+    data = asyncio.run(scrape_bet9ja(max_matches=10))
     print(json.dumps(data, indent=2))
