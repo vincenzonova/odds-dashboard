@@ -39,8 +39,6 @@ def _build_sportybet_map(bet9ja_matches: list[dict], sb_events: list[dict]) -> d
     sb_map = {}
     for b9 in bet9ja_matches:
         event_name = b9["event"]
-        best_match = None
-        best_score = 0.0
         for sb in sb_events:
             if fuzzy_match(event_name, sb["event"]):
                 sb_map[event_name] = sb.get("odds", {})
@@ -51,50 +49,54 @@ def _build_sportybet_map(bet9ja_matches: list[dict], sb_events: list[dict]) -> d
 
 
 def merge_odds(bet9ja_matches: list[dict], sportybet_map: dict) -> list[dict]:
-    """
-    Combine Bet9ja and SportyBet odds into comparison rows.
-    Each row = one market/sign combination per match.
-    """
     MARKETS = [
         ("1X2",    ["1", "X", "2"]),
         ("O/U 2.5",["Over", "Under"]),
         ("Double Chance", ["1X", "12", "X2"]),
     ]
-
     rows = []
     for match in bet9ja_matches:
         event  = match["event"]
         league = match["league"]
         b9_odds = match.get("odds", {})
         sb_odds = sportybet_map.get(event, {})
-
         for market, signs in MARKETS:
             for sign in signs:
                 b9_val = b9_odds.get(market, {}).get(sign, "")
                 sb_val = sb_odds.get(market, {}).get(sign, "")
-
                 if not b9_val and not sb_val:
                     continue
-
                 diff = None
                 try:
-                    b9_f  = float(b9_val)
-                    sb_f  = float(sb_val)
+                    b9_f = float(b9_val)
+                    sb_f = float(sb_val)
                     diff = round(sb_f - b9_f, 3)
                 except (ValueError, TypeError):
                     pass
-
                 rows.append({
-                    "league":    league,
-                    "event":     event,
-                    "market":    market,
-                    "sign":      sign,
-                    "bet9ja":    b9_val or "—",
-                    "sportybet": sb_val or "—",
-                    "diff":      diff,
+                    "league": league, "event": event, "market": market,
+                    "sign": sign, "bet9ja": b9_val or "—",
+                    "sportybet": sb_val or "—", "diff": diff,
                 })
-
     rows.sort(key=lambda r: (-(r["diff"] or 0), r["league"], r["event"]))
+    return rows
+
+
+def _sb_only_rows(sb_events: list[dict]) -> list[dict]:
+    """Build rows from SportyBet data alone (when Bet9ja is unavailable)."""
+    MARKETS = [("1X2", ["1", "X", "2"]), ("O/U 2.5", ["Over", "Under"])]
+    rows = []
+    for ev in sb_events:
+        for market, signs in MARKETS:
+            for sign in signs:
+                sb_val = ev.get("odds", {}).get(market, {}).get(sign, "")
+                if not sb_val:
+                    continue
+                rows.append({
+                    "league": ev.get("league", ""), "event": ev["event"],
+                    "market": market, "sign": sign, "bet9ja": "—",
+                    "sportybet": sb_val, "diff": None,
+                })
     return rows
 
 
@@ -108,24 +110,36 @@ async def do_refresh():
     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Starting refresh...")
 
     try:
-        # Bet9ja (Playwright)
-        bet9ja_matches = await scrape_bet9ja(max_matches=MAX_MATCHES)
+        # Bet9ja (Playwright) — may fail due to geo-blocking
+        bet9ja_matches = []
+        try:
+            bet9ja_matches = await scrape_bet9ja(max_matches=MAX_MATCHES)
+        except Exception as e:
+            print(f"  [Bet9ja] Scraper failed: {e}")
 
-        if not bet9ja_matches:
-            cache["status"] = "No matches found from Bet9ja"
-            return
-
-        # SportyBet (API) — fetch independently then fuzzy-match
+        # SportyBet (API) — always attempt
         sb_events = scrape_sportybet(max_matches=MAX_MATCHES)
-        sportybet_map = _build_sportybet_map(bet9ja_matches, sb_events)
 
-        # Merge
-        rows = merge_odds(bet9ja_matches, sportybet_map)
+        if bet9ja_matches and sb_events:
+            # Full comparison mode
+            sportybet_map = _build_sportybet_map(bet9ja_matches, sb_events)
+            rows = merge_odds(bet9ja_matches, sportybet_map)
+            cache["status"] = f"OK — {len(rows)} rows, {len(bet9ja_matches)} Bet9ja + {len(sb_events)} SportyBet"
+        elif bet9ja_matches:
+            # Bet9ja only
+            rows = merge_odds(bet9ja_matches, {})
+            cache["status"] = f"Bet9ja only — {len(rows)} rows (SportyBet unavailable)"
+        elif sb_events:
+            # SportyBet only
+            rows = _sb_only_rows(sb_events)
+            cache["status"] = f"SportyBet only — {len(rows)} rows (Bet9ja unavailable)"
+        else:
+            rows = []
+            cache["status"] = "No data from either source"
 
-        cache["rows"]         = rows
+        cache["rows"] = rows
         cache["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cache["status"]       = f"OK — {len(rows)} rows, {len(bet9ja_matches)} matches"
-        print(f"[Refresh] Done: {len(rows)} rows from {len(bet9ja_matches)} matches")
+        print(f"[Refresh] Done: {len(rows)} rows")
 
     except Exception as e:
         cache["status"] = f"Error: {e}"
@@ -133,8 +147,6 @@ async def do_refresh():
     finally:
         cache["is_refreshing"] = False
 
-
-# ── App lifecycle ─────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -147,8 +159,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Odds Dashboard", lifespan=lifespan)
 
-
-# ── Routes ────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
