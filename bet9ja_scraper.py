@@ -69,6 +69,18 @@ def _parse_event(event: dict, league_name: str) -> dict | None:
     start_time = event.get("DA", event.get("DT", ""))
     if start_time:
         result["start_time"] = str(start_time)
+    # Detect "Best Price" events (excluded from Multiple Boost bonus)
+    is_bp = (
+        event.get("BP", False) or event.get("IsBP", False)
+        or event.get("BestPrice", False) or event.get("IsBestPrice", False)
+        or event.get("PB", False)
+    )
+    tags = str(event.get("T", "")) + str(event.get("Tags", "")) + str(event.get("Labels", ""))
+    if "bestprice" in tags.lower().replace(" ", "") or "best_price" in tags.lower():
+        is_bp = True
+    if is_bp:
+        result["best_price"] = True
+
     return result
 
 
@@ -114,6 +126,9 @@ async def scrape_bet9ja(max_matches: int = 50) -> list[dict]:
 
                     events = data.get("D", {}).get("E", [])
                     added = 0
+                    if events:
+                        print(f"  [Bet9ja] Sample keys: {list(events[0].keys())}")
+                        print(f"  [Bet9ja] DA={events[0].get('DA','?')} BP={events[0].get('BP','?')}")
                     for ev in events:
                         parsed = _parse_event(ev, league_name)
                         if parsed:
