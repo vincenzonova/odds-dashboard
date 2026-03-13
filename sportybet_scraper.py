@@ -1,15 +1,17 @@
 """
-SportyBet Scraper — uses Playwright to render the page and extract odds from DOM.
+SportyBet Scraper - uses Playwright to render the page and extract odds from DOM.
 Needed because SportyBet's API requires session cookies set by their JS framework.
-
 Extracts:
-  • 1X2 odds (from the default "3 Way & O/U" tab)
-  • Over/Under 2.5 (only when the displayed spread is actually 2.5)
-  • Double Chance (by clicking the "Double Chance" tab)
+  - 1X2 odds (from the default "3 Way & O/U" tab)
+  - Over/Under 2.5 (only when the displayed spread is actually 2.5)
+  - Over/Under 1.5 (by clicking spread dropdown to select 1.5)
+  - Double Chance (by clicking the "Double Chance" tab)
 """
+
 import asyncio
 from playwright.async_api import async_playwright
 from difflib import SequenceMatcher
+
 
 SPORTYBET_BASE = "https://www.sportybet.com/ng/sport/football"
 
@@ -23,82 +25,81 @@ TOURNAMENT_URLS = {
     "Europa League":  f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:679",
 }
 
-# ── JS extraction for "3 Way & O/U" tab ────────────────────────
+
+# -- JS extraction for "3 Way & O/U" tab --
 # Returns 1X2 odds + O/U odds + current spread per match
 JS_EXTRACT_MAIN = """
 () => {
+  const rows = document.querySelectorAll('.match-row');
+  const matches = [];
+  for (const row of rows) {
+    const home = row.querySelector('.home-team')?.textContent?.trim() || '';
+    const away = row.querySelector('.away-team')?.textContent?.trim() || '';
+    const oddsEls = [...row.querySelectorAll('.m-outcome-odds')];
+    const odds = oddsEls.map(o => o.textContent.trim());
+    const spread = row.querySelector('.af-select-input')?.textContent?.trim() || '';
+    if (home && away && odds.length >= 3) {
+      matches.push({ home, away, odds, spread });
+    }
+  }
+  return matches;
+}
+"""
+
+
+# -- JS: click a specific row's spread dropdown and select a target value --
+# Takes [rowIndex, targetSpread] - clicks the dropdown, picks the target, returns new O/U odds
+JS_CLICK_SPREAD_VALUE = """
+([rowIndex, targetSpread]) => {
+  return new Promise((resolve) => {
     const rows = document.querySelectorAll('.match-row');
-    const matches = [];
-    for (const row of rows) {
-        const home = row.querySelector('.home-team')?.textContent?.trim() || '';
-        const away = row.querySelector('.away-team')?.textContent?.trim() || '';
+    if (rowIndex >= rows.length) { resolve(null); return; }
+    const row = rows[rowIndex];
+
+    const selectTitle = row.querySelector('.af-select-title') || row.querySelector('.af-select');
+    if (!selectTitle) { resolve(null); return; }
+    selectTitle.click();
+
+    setTimeout(() => {
+      const openList = document.querySelector('.af-select-list.af-select-list-open');
+      if (!openList) { resolve(null); return; }
+      const items = [...openList.querySelectorAll('.af-select-item')];
+      const target = items.find(i => i.textContent.trim() === targetSpread);
+      if (!target) {
+        document.body.click();
+        resolve(null);
+        return;
+      }
+      target.click();
+
+      setTimeout(() => {
         const oddsEls = [...row.querySelectorAll('.m-outcome-odds')];
         const odds = oddsEls.map(o => o.textContent.trim());
-        const spread = row.querySelector('.af-select-input')?.textContent?.trim() || '';
-        if (home && away && odds.length >= 3) {
-            matches.push({ home, away, odds, spread });
-        }
-    }
-    return matches;
+        const newSpread = row.querySelector('.af-select-input')?.textContent?.trim() || '';
+        resolve({ odds, spread: newSpread });
+      }, 800);
+    }, 500);
+  });
 }
 """
 
-# ── JS: click a specific row's spread dropdown and select 2.5 ──
-# Takes rowIndex (0-based) — clicks the dropdown, picks "2.5", returns new O/U odds
-JS_CLICK_SPREAD = """
-(rowIndex) => {
-    return new Promise((resolve) => {
-        const rows = document.querySelectorAll('.match-row');
-        if (rowIndex >= rows.length) { resolve(null); return; }
-        const row = rows[rowIndex];
 
-        // Click the dropdown trigger to open it
-        const selectTitle = row.querySelector('.af-select-title') || row.querySelector('.af-select');
-        if (!selectTitle) { resolve(null); return; }
-        selectTitle.click();
-
-        // Wait for dropdown to open, then click 2.5
-        setTimeout(() => {
-            const openList = document.querySelector('.af-select-list.af-select-list-open');
-            if (!openList) { resolve(null); return; }
-            const items = [...openList.querySelectorAll('.af-select-item')];
-            const target = items.find(i => i.textContent.trim() === '2.5');
-            if (!target) {
-                // Close dropdown by clicking elsewhere
-                document.body.click();
-                resolve(null);
-                return;
-            }
-            target.click();
-
-            // Wait for odds to update after selection
-            setTimeout(() => {
-                const oddsEls = [...row.querySelectorAll('.m-outcome-odds')];
-                const odds = oddsEls.map(o => o.textContent.trim());
-                const newSpread = row.querySelector('.af-select-input')?.textContent?.trim() || '';
-                resolve({ odds, spread: newSpread });
-            }, 800);
-        }, 500);
-    });
-}
-"""
-
-# ── JS extraction for "Double Chance" tab ───────────────────────
+# -- JS extraction for "Double Chance" tab --
 # Returns 3 odds: 1X, 12, X2
 JS_EXTRACT_DC = """
 () => {
-    const rows = document.querySelectorAll('.match-row');
-    const matches = [];
-    for (const row of rows) {
-        const home = row.querySelector('.home-team')?.textContent?.trim() || '';
-        const away = row.querySelector('.away-team')?.textContent?.trim() || '';
-        const oddsEls = [...row.querySelectorAll('.m-outcome-odds')];
-        const odds = oddsEls.map(o => o.textContent.trim());
-        if (home && away && odds.length >= 3) {
-            matches.push({ home, away, odds });
-        }
+  const rows = document.querySelectorAll('.match-row');
+  const matches = [];
+  for (const row of rows) {
+    const home = row.querySelector('.home-team')?.textContent?.trim() || '';
+    const away = row.querySelector('.away-team')?.textContent?.trim() || '';
+    const oddsEls = [...row.querySelectorAll('.m-outcome-odds')];
+    const odds = oddsEls.map(o => o.textContent.trim());
+    if (home && away && odds.length >= 3) {
+      matches.push({ home, away, odds });
     }
-    return matches;
+  }
+  return matches;
 }
 """
 
@@ -127,12 +128,12 @@ def _add_dc_odds(existing_odds: dict, dc_odds_list: list[str]) -> dict:
     return existing_odds
 
 
-# ── Team name normalization ──────────────────────────────────────
+# -- Team name normalization --
 # Common abbreviations/aliases between Bet9ja and SportyBet
 TEAM_ALIASES = {
     "atl. madrid": "atletico madrid",
     "atl madrid": "atletico madrid",
-    "atlético madrid": "atletico madrid",
+    "atletico madrid": "atletico madrid",
     "atletico de madrid": "atletico madrid",
     "man utd": "manchester utd",
     "man united": "manchester utd",
@@ -172,7 +173,6 @@ TEAM_ALIASES = {
     "real madrid cf": "real madrid",
     "bayern munich": "bayern",
     "bayern munchen": "bayern",
-    "bayern münchen": "bayern",
     "b. dortmund": "dortmund",
     "borussia dortmund": "dortmund",
     "b. monchengladbach": "gladbach",
@@ -232,50 +232,61 @@ def fuzzy_match(name_a: str, name_b: str, threshold: float = 0.70) -> bool:
     """
     home_a, away_a = _split_teams(name_a)
     home_b, away_b = _split_teams(name_b)
-
     if not home_a or not home_b:
         return False
-
     # Try direct match (home-home, away-away)
     home_sim = _team_similarity(home_a, home_b)
     away_sim = _team_similarity(away_a, away_b) if away_a and away_b else 0
-
     if home_sim >= threshold and away_sim >= threshold:
         return True
-
-    # Try swapped match (home-away, away-home) — sometimes order differs
+    # Try swapped match (home-away, away-home) - sometimes order differs
     home_sim2 = _team_similarity(home_a, away_b) if away_b else 0
     away_sim2 = _team_similarity(away_a, home_b) if away_a else 0
-
     if home_sim2 >= threshold and away_sim2 >= threshold:
         return True
-
     return False
 
 
-async def _scrape_league(page, league_name: str, url: str, seen: set, max_matches: int, current_count: int) -> list[dict]:
-    """Scrape a single league: main tab (1X2 + O/U 2.5) then Double Chance tab."""
-    results = []
+async def _click_spread_for_value(page, dom_row_idx: int, target: str):
+    """Click a row's spread dropdown and select the target value. Returns O/U odds dict or None."""
+    try:
+        result = await page.evaluate(JS_CLICK_SPREAD_VALUE, [dom_row_idx, target])
+        if result and result.get("spread", "").strip() == target:
+            odds_list = result["odds"]
+            if len(odds_list) >= 5:
+                return {"Over": odds_list[3], "Under": odds_list[4]}
+        return None
+    except Exception:
+        return None
 
+
+async def _scrape_league(page, league_name: str, url: str, seen: set,
+                         max_matches: int, current_count: int) -> list[dict]:
+    """Scrape a single league: main tab (1X2 + O/U 2.5 + O/U 1.5) then Double Chance tab."""
+    results = []
     print(f"  [SportyBet] Loading {league_name}...")
+
     await page.goto(url, wait_until="domcontentloaded", timeout=30000)
     await page.wait_for_selector(".match-row", timeout=15000)
     await page.wait_for_timeout(1000)
 
-    # ── Step 1: Scrape "3 Way & O/U" tab (default) ──
+    # -- Step 1: Scrape "3 Way & O/U" tab (default) --
     raw_main = await page.evaluate(JS_EXTRACT_MAIN)
 
     # Build initial results with 1X2 + conditional O/U 2.5
-    # Also track which DOM row indices need dropdown interaction
+    # Also track DOM row indices for dropdown interactions
     league_matches = []
-    rows_needing_ou = []  # (match_index, dom_row_index)
+    rows_needing_ou25 = []  # (match_index, dom_row_index) for rows where spread != 2.5
+    all_dom_indices = []     # (match_index, dom_row_index) for ALL rows (for O/U 1.5)
     dom_index = 0
+
     for m in raw_main:
         key = f"{m['home']}-{m['away']}"
         if key in seen:
             dom_index += 1
             continue
         seen.add(key)
+
         odds = _build_odds_dict(m)
         if odds:
             spread = m.get("spread", "")
@@ -286,36 +297,43 @@ async def _scrape_league(page, league_name: str, url: str, seen: set, max_matche
                 "league": league_name,
                 "odds": odds,
             })
+
+            # Track ALL rows for O/U 1.5 scraping
+            all_dom_indices.append((match_idx, dom_index))
+
             # Track rows where spread != 2.5 but O/U odds exist (just wrong spread)
             if spread.strip() != "2.5" and len(m["odds"]) >= 5:
-                rows_needing_ou.append((match_idx, dom_index))
+                rows_needing_ou25.append((match_idx, dom_index))
+
         dom_index += 1
         if current_count + len(league_matches) >= max_matches:
             break
 
-    # ── Step 1b: Click dropdown to select 2.5 for rows with non-2.5 spread ──
-    if rows_needing_ou:
-        print(f"  [SportyBet] {league_name}: fixing O/U spread for {len(rows_needing_ou)} matches...")
+    # -- Step 1b: Click dropdown to select 2.5 for rows with non-2.5 spread --
+    if rows_needing_ou25:
+        print(f"  [SportyBet] {league_name}: fixing O/U 2.5 spread for {len(rows_needing_ou25)} matches...")
         ou_fixed = 0
-        for match_idx, dom_row_idx in rows_needing_ou:
-            try:
-                result = await page.evaluate(JS_CLICK_SPREAD, dom_row_idx)
-                if result and result.get("spread", "").strip() == "2.5":
-                    odds_list = result["odds"]
-                    if len(odds_list) >= 5:
-                        league_matches[match_idx]["odds"]["O/U 2.5"] = {
-                            "Over": odds_list[3],
-                            "Under": odds_list[4],
-                        }
-                        ou_fixed += 1
-                # Small delay between dropdown interactions to avoid race conditions
-                await page.wait_for_timeout(300)
-            except Exception as e:
-                print(f"  [SportyBet] dropdown click failed for row {dom_row_idx}: {e}")
-                continue
-        print(f"  [SportyBet] {league_name}: fixed O/U for {ou_fixed}/{len(rows_needing_ou)} matches")
+        for match_idx, dom_row_idx in rows_needing_ou25:
+            ou_odds = await _click_spread_for_value(page, dom_row_idx, "2.5")
+            if ou_odds:
+                league_matches[match_idx]["odds"]["O/U 2.5"] = ou_odds
+                ou_fixed += 1
+            await page.wait_for_timeout(300)
+        print(f"  [SportyBet] {league_name}: fixed O/U 2.5 for {ou_fixed}/{len(rows_needing_ou25)} matches")
 
-    # ── Step 2: Click "Double Chance" tab and scrape ──
+    # -- Step 1c: Click dropdown to select 1.5 for ALL rows to get O/U 1.5 --
+    if all_dom_indices:
+        print(f"  [SportyBet] {league_name}: scraping O/U 1.5 for {len(all_dom_indices)} matches...")
+        ou15_count = 0
+        for match_idx, dom_row_idx in all_dom_indices:
+            ou_odds = await _click_spread_for_value(page, dom_row_idx, "1.5")
+            if ou_odds:
+                league_matches[match_idx]["odds"]["O/U 1.5"] = ou_odds
+                ou15_count += 1
+            await page.wait_for_timeout(300)
+        print(f"  [SportyBet] {league_name}: got O/U 1.5 for {ou15_count}/{len(all_dom_indices)} matches")
+
+    # -- Step 2: Click "Double Chance" tab and scrape --
     try:
         dc_tab = page.locator('.market-item', has_text='Double Chance')
         if await dc_tab.count() > 0:
@@ -376,7 +394,7 @@ async def scrape_sportybet(max_matches: int = 50) -> list[dict]:
 
         await browser.close()
 
-    print(f"  [SportyBet] Done — {len(results)} matches total")
+    print(f"  [SportyBet] Done - {len(results)} matches total")
     return results
 
 
