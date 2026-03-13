@@ -48,7 +48,7 @@ DB_PATH = "odds_history.db"
 cache = {
     "rows": [],
     "last_updated": None,
-    "status": "Initialising…",
+    "status": "Initialising\u2026",
     "is_refreshing": False,
     "accumulators": [],
     "raw_bet9ja": [],
@@ -126,11 +126,11 @@ def save_odds_to_db(rows: list):
             row.get("event", ""),
             row.get("market", ""),
             row.get("sign", ""),
-            row.get("bet9ja", "—"),
-            row.get("sportybet", "—"),
-            row.get("betking", "—"),
-            row.get("msport", "—"),
-            row.get("betano", "—"),
+            row.get("bet9ja", "\u2014"),
+            row.get("sportybet", "\u2014"),
+            row.get("betking", "\u2014"),
+            row.get("msport", "\u2014"),
+            row.get("betano", "\u2014"),
             row.get("diff", 0.0),
         ))
 
@@ -138,23 +138,62 @@ def save_odds_to_db(rows: list):
     conn.close()
 
 
-def fuzzy_match_event(bet9ja_event: str, other_event: str, threshold: float = 0.7) -> bool:
-    """Simple fuzzy matching for event names across bookmakers."""
-    bet9ja_lower = bet9ja_event.lower().strip()
-    other_lower = other_event.lower().strip()
+def _team_word_sim(a: str, b: str) -> float:
+    """Word-overlap similarity between two team names."""
+    wa = set(a.split())
+    wb = set(b.split())
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / max(len(wa), len(wb))
 
-    if bet9ja_lower == other_lower:
-        return True
 
-    # Extract team names (simple approach)
-    bet9ja_parts = set(bet9ja_lower.split())
-    other_parts = set(other_lower.split())
+# Signs that need swapping when teams are in reversed order
+SIGN_SWAP_MAP = {
+    "1": "2", "2": "1",
+    "1X": "X2", "X2": "1X",
+    # These stay the same:
+    "X": "X", "12": "12",
+    "Over": "Over", "Under": "Under",
+}
 
-    if len(bet9ja_parts) == 0 or len(other_parts) == 0:
-        return False
 
-    overlap = len(bet9ja_parts & other_parts) / max(len(bet9ja_parts), len(other_parts))
-    return overlap >= threshold
+def fuzzy_match_event(event1: str, event2: str, threshold: float = 0.7) -> tuple:
+    """
+    Fuzzy matching for event names across bookmakers.
+    Returns (is_match: bool, is_reversed: bool).
+    is_reversed=True means event2 has teams in opposite order from event1.
+    """
+    e1 = event1.lower().strip()
+    e2 = event2.lower().strip()
+
+    if e1 == e2:
+        return (True, False)
+
+    # Split into home/away teams using " - " separator
+    parts1 = [p.strip() for p in e1.split(" - ", 1)]
+    parts2 = [p.strip() for p in e2.split(" - ", 1)]
+
+    if len(parts1) != 2 or len(parts2) != 2:
+        # Fallback to simple word overlap (can't detect reversal)
+        words1 = set(e1.split())
+        words2 = set(e2.split())
+        if not words1 or not words2:
+            return (False, False)
+        overlap = len(words1 & words2) / max(len(words1), len(words2))
+        return (overlap >= threshold, False)
+
+    home1, away1 = parts1
+    home2, away2 = parts2
+
+    # Try direct match: home1~home2, away1~away2
+    if _team_word_sim(home1, home2) >= threshold and _team_word_sim(away1, away2) >= threshold:
+        return (True, False)
+
+    # Try reversed match: home1~away2, away1~home2
+    if _team_word_sim(home1, away2) >= threshold and _team_word_sim(away1, home2) >= threshold:
+        return (True, True)
+
+    return (False, False)
 
 
 def merge_odds(raw_data: dict) -> list:
@@ -177,10 +216,13 @@ def merge_odds(raw_data: dict) -> list:
 
             # Try to find existing key via fuzzy match
             matched_key = None
+            is_reversed = False
             for existing_key in unified:
                 existing_event = unified[existing_key]["event"]
-                if fuzzy_match_event(existing_event, event_name):
+                match_result = fuzzy_match_event(existing_event, event_name)
+                if match_result[0]:  # is_match
                     matched_key = existing_key
+                    is_reversed = match_result[1]
                     break
 
             if matched_key is None:
@@ -198,11 +240,13 @@ def merge_odds(raw_data: dict) -> list:
                 if market not in unified[matched_key]["markets"]:
                     unified[matched_key]["markets"][market] = {}
                 for sign, odds_str in signs.items():
-                    if sign not in unified[matched_key]["markets"][market]:
-                        unified[matched_key]["markets"][market][sign] = {}
+                    # Swap sign if teams are in reversed order
+                    actual_sign = SIGN_SWAP_MAP.get(sign, sign) if is_reversed else sign
+                    if actual_sign not in unified[matched_key]["markets"][market]:
+                        unified[matched_key]["markets"][market][actual_sign] = {}
                     try:
                         odds_val = float(str(odds_str).replace(",", "."))
-                        unified[matched_key]["markets"][market][sign][bk_name] = odds_val
+                        unified[matched_key]["markets"][market][actual_sign][bk_name] = odds_val
                     except (ValueError, AttributeError, TypeError):
                         pass
 
@@ -261,7 +305,7 @@ async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_M
 
 async def do_refresh():
     """Refresh odds from all 5 bookmakers concurrently."""
-    cache["status"] = "Refreshing…"
+    cache["status"] = "Refreshing\u2026"
     cache["is_refreshing"] = True
 
     try:
