@@ -159,6 +159,8 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 <!-- ============== TAB 2: BET COMPARISON =============== -->
 <div class="tab-content" id="tab-accumulators">
   <div class="acca-loading" id="acca-loading">Loading accumulators&hellip;</div>
+  
+  <div style="text-align:right;margin:10px 0"><button onclick="regenerateAccas()" style="background:#6366f1;color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:.9rem" id="regen-btn">&#x1F504; Regenerate</button></div>
   <div class="acca-grid" id="acca-grid" style="display:none"></div>
   <div class="acca-empty" id="acca-empty" style="display:none">
     <p>No accumulators available yet. Need at least 3 matched events with 1X2 odds between 1.20-1.80 from both bookmakers.</p>
@@ -295,7 +297,25 @@ function renderTable() {{
 
 /* -- Accumulators ------------------------------------ */
 let accaLoaded = false;
-async function loadAccumulators() {{
+async 
+      function regenerateAccas() {
+        const btn = document.getElementById('regen-btn');
+        btn.disabled = true;
+        btn.textContent = 'Regenerating...';
+        fetch('/api/regenerate')
+          .then(r => r.json())
+          .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = '&#x1F504; Regenerate';
+            loadAccumulators();
+          })
+          .catch(err => {
+            btn.disabled = false;
+            btn.innerHTML = '&#x1F504; Regenerate';
+            console.error('Regenerate failed:', err);
+          });
+      }
+      function loadAccumulators() {{
   if (accaLoaded) return;
   try {{
     const res = await fetch('/api/accumulators');
@@ -336,7 +356,7 @@ async function loadAccumulators() {{
             <ul class="sel-list">${{selHtml}}</ul>
             <div class="bookmaker-compare">
               <div class="bm-box bm-b9">
-                <div class="bm-name"><span>Bet9ja</span><span class="bm-source">${{b9.source === 'betslip' ? '\u2713 Real' : b9.source === 'formula' ? '&#x1F4D0; Formula' : '\u2248 Est.'}}</span></div>
+                <div class="bm-name"><span>Bet9ja</span><span class="bm-source">${b9.source === 'betslip' ? '\u2713 Real' : b9.source === 'calculated' ? '\u2713 Calculated' : '\u2248 Est.'}}</span></div>
                 <div class="bm-row"><span class="bm-label">Combined Odds</span><span class="bm-val ${{bestOdds==='b9'?'best-val':''}}">${{b9.odds.toFixed(2)}}</span></div>
                 <div class="bm-row"><span class="bm-label">Base Win (<span class="naira">&#8358;</span>100)</span><span class="bm-val"><span class="naira">&#8358;</span>${{fmtN(b9.base_win)}}</span></div>
                 <div class="bm-row"><span class="bm-label">Bonus</span><span class="bm-val">${{b9.bonus_percent}}% (<span class="naira">&#8358;</span>${{fmtN(b9.bonus_amount)}})</span></div>
