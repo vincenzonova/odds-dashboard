@@ -16,6 +16,7 @@ LEAGUE_IDS = {
     "Ligue 1": 950503,
     "Champions League": 180931,
     "Europa League": 180933,
+    "Conference League": 180935,
 }
 
 HEADERS = {
@@ -37,6 +38,8 @@ ODDS_MAPPING = {
     "S_DC_X2":    ("Double Chance", "X2"),
     "S_OU@2.5_O": ("O/U 2.5", "Over"),
     "S_OU@2.5_U": ("O/U 2.5", "Under"),
+    "S_OU@1.5_O": ("O/U 1.5", "Over"),
+    "S_OU@1.5_U": ("O/U 1.5", "Under"),
 }
 
 
