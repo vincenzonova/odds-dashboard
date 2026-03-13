@@ -1,0 +1,9 @@
+services:
+  odds-dashboard:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - REFRESH_MINUTES=10
+      - MAX_MATCHES=40
+    restart: unless-stopped
