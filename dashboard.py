@@ -1,19 +1,19 @@
 """
-Dashboard HTML builder â single-file HTML with:
-  â¢ Tab navigation: Odds Dashboard | Bet Comparison
-  â¢ Sortable, filterable odds table with search + league/market filters
-  â¢ Accumulator cards with side-by-side Bet9ja vs SportyBet breakdown
-  â¢ Logout button in header
-  â¢ Auto-refresh every 10 minutes
-  â¢ Dark theme throughout
+Dashboard HTML builder - single-file HTML with:
+  - Tab navigation: Odds Dashboard | Bet Comparison
+  - Sortable, filterable odds table with search + league/market filters
+  - Accumulator cards with side-by-side Bet9ja vs SportyBet breakdown
+  - Logout button in header
+  - Auto-refresh every 10 minutes
+  - Dark theme throughout
 """
 
 
 def build_dashboard_html(cache: dict) -> str:
     import json
     rows_json = json.dumps(cache.get("rows", []))
-    last_updated = cache.get("last_updated", "â")
-    status = cache.get("status", "Loadingâ¦")
+    last_updated = cache.get("last_updated", "&mdash;")
+    status = cache.get("status", "Loading&hellip;")
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -22,11 +22,11 @@ def build_dashboard_html(cache: dict) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Odds Dashboard</title>
 <style>
-/* ââ Reset & Base ââââââââââââââââââââââââââââââââââ */
+/* -- Reset & Base ---------------------------------- */
 *{{margin:0;padding:0;box-sizing:border-box}}
 body{{font-family:'Inter','Segoe UI',system-ui,sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh}}
 
-/* ââ Header ââââââââââââââââââââââââââââââââââââââââ */
+/* -- Header ---------------------------------------- */
 .header{{background:#1a1d27;border-bottom:1px solid #2d3144;padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}}
 .header h1{{font-size:1.3rem;white-space:nowrap}} .header h1 span{{color:#6366f1}}
 .header-right{{display:flex;align-items:center;gap:16px;flex-wrap:wrap}}
@@ -35,15 +35,15 @@ body{{font-family:'Inter','Segoe UI',system-ui,sans-serif;background:#0f1117;col
 .btn-refresh{{background:#22c55e;color:#fff}} .btn-refresh:hover{{background:#16a34a}}
 .btn-logout{{background:#334155;color:#94a3b8;text-decoration:none;display:inline-block}} .btn-logout:hover{{background:#475569;color:#e2e8f0}}
 
-/* ââ Tabs âââââââââââââââââââââââââââââââââââââââââââ */
+/* -- Tabs ------------------------------------------- */
 .tabs{{display:flex;gap:0;background:#1a1d27;border-bottom:1px solid #2d3144;padding:0 24px}}
 .tab-btn{{padding:12px 24px;font-size:.9rem;font-weight:600;color:#64748b;cursor:pointer;border:none;background:transparent;border-bottom:2px solid transparent;transition:all .15s}}
 .tab-btn:hover{{color:#e2e8f0}} .tab-btn.active{{color:#6366f1;border-bottom-color:#6366f1}}
 
-/* ââ Tab Content ââââââââââââââââââââââââââââââââââââ */
+/* -- Tab Content ------------------------------------ */
 .tab-content{{display:none;padding:20px 24px}} .tab-content.active{{display:block}}
 
-/* ââ Filters ââââââââââââââââââââââââââââââââââââââââ */
+/* -- Filters ---------------------------------------- */
 .filters{{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;align-items:center}}
 .search-box{{padding:8px 12px;border-radius:8px;border:1px solid #2d3144;background:#1a1d27;color:#e2e8f0;font-size:.85rem;width:260px;outline:none}}
 .search-box:focus{{border-color:#6366f1}}
@@ -53,7 +53,7 @@ body{{font-family:'Inter','Segoe UI',system-ui,sans-serif;background:#0f1117;col
 .filter-group{{display:flex;flex-wrap:wrap;gap:6px;align-items:center}}
 .filter-label{{font-size:.72rem;color:#475569;text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-right:4px}}
 
-/* ââ Table ââââââââââââââââââââââââââââââââââââââââââ */
+/* -- Table ------------------------------------------ */
 .table-wrap{{overflow-x:auto;border-radius:10px;border:1px solid #2d3144}}
 table{{width:100%;border-collapse:collapse;font-size:.82rem}}
 th{{background:#1a1d27;padding:10px 12px;text-align:left;font-weight:700;color:#94a3b8;cursor:pointer;white-space:nowrap;user-select:none;position:sticky;top:0;border-bottom:1px solid #2d3144}}
@@ -73,7 +73,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 .missing{{color:#475569}}
 .row-count{{font-size:.78rem;color:#64748b;margin-top:10px;text-align:right}}
 
-/* ââ Accumulator Cards ââââââââââââââââââââââââââââââ */
+/* -- Accumulator Cards ------------------------------ */
 .acca-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:16px}}
 .acca-card{{background:#1a1d27;border:1px solid #2d3144;border-radius:12px;overflow:hidden}}
 .acca-header{{padding:14px 18px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #2d3144}}
@@ -96,7 +96,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 .naira{{font-family:'Inter',system-ui,sans-serif}}
 .best-val{{color:#22c55e !important}}
 
-/* ââ Responsive âââââââââââââââââââââââââââââââââââââ */
+/* -- Responsive ------------------------------------- */
 @media(max-width:768px){{
   .header{{padding:12px 16px}} .tab-content{{padding:16px}} .search-box{{width:100%}}
   .acca-grid{{grid-template-columns:1fr}} .bookmaker-compare{{grid-template-columns:1fr}}
@@ -106,28 +106,28 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 </head>
 <body>
 
-<!-- ââ Header ââââââââââââââââââââââââââââââââââââââââ -->
+<!-- -- Header ---------------------------------------- -->
 <div class="header">
-  <h1>â½ Odds <span>Dashboard</span></h1>
+  <h1>&#9917; Odds <span>Dashboard</span></h1>
   <div class="header-right">
     <span class="status" id="status">{status}</span>
     <span class="status" id="updated">Updated: {last_updated}</span>
-    <button class="btn btn-refresh" onclick="triggerRefresh()">â» Refresh</button>
+    <button class="btn btn-refresh" onclick="triggerRefresh()">&#8635; Refresh</button>
     <a class="btn btn-logout" href="/logout">Logout</a>
   </div>
 </div>
 
-<!-- ââ Tabs âââââââââââââââââââââââââââââââââââââââââââ -->
+<!-- -- Tabs ------------------------------------------- -->
 <div class="tabs">
   <button class="tab-btn active" data-tab="odds">Odds Dashboard</button>
   <button class="tab-btn" data-tab="accumulators">Bet Comparison</button>
 </div>
 
-<!-- âââââââââââââââ TAB 1: ODDS DASHBOARD âââââââââââââââ -->
+<!-- ============== TAB 1: ODDS DASHBOARD =============== -->
 <div class="tab-content active" id="tab-odds">
   <!-- Filters -->
   <div class="filters">
-    <input class="search-box" id="search" placeholder="Search event or teamâ¦" oninput="applyFilters()">
+    <input class="search-box" id="search" placeholder="Search event or team&hellip;" oninput="applyFilters()">
     <div class="filter-group" id="league-filters">
       <span class="filter-label">League</span>
     </div>
@@ -141,13 +141,13 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
     <table id="odds-table">
       <thead>
         <tr>
-          <th data-col="league">League <span class="sort-arrow">â²</span></th>
-          <th data-col="event">Event <span class="sort-arrow">â²</span></th>
-          <th data-col="market">Market <span class="sort-arrow">â²</span></th>
-          <th data-col="sign">Sign <span class="sort-arrow">â²</span></th>
-          <th data-col="bet9ja">Bet9ja <span class="sort-arrow">â²</span></th>
-          <th data-col="sportybet">SportyBet <span class="sort-arrow">â²</span></th>
-          <th data-col="diff">Diff <span class="sort-arrow">â²</span></th>
+          <th data-col="league">League <span class="sort-arrow">&#9650;</span></th>
+          <th data-col="event">Event <span class="sort-arrow">&#9650;</span></th>
+          <th data-col="market">Market <span class="sort-arrow">&#9650;</span></th>
+          <th data-col="sign">Sign <span class="sort-arrow">&#9650;</span></th>
+          <th data-col="bet9ja">Bet9ja <span class="sort-arrow">&#9650;</span></th>
+          <th data-col="sportybet">SportyBet <span class="sort-arrow">&#9650;</span></th>
+          <th data-col="diff">Diff <span class="sort-arrow">&#9650;</span></th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>
@@ -156,9 +156,9 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
   <div class="row-count" id="row-count"></div>
 </div>
 
-<!-- âââââââââââââââ TAB 2: BET COMPARISON âââââââââââââââ -->
+<!-- ============== TAB 2: BET COMPARISON =============== -->
 <div class="tab-content" id="tab-accumulators">
-  <div class="acca-loading" id="acca-loading">Loading accumulatorsâ¦</div>
+  <div class="acca-loading" id="acca-loading">Loading accumulators&hellip;</div>
   <div class="acca-grid" id="acca-grid" style="display:none"></div>
   <div class="acca-empty" id="acca-empty" style="display:none">
     <p>No accumulators available yet. Need at least 3 matched events with 1X2 odds between 1.20-1.80 from both bookmakers.</p>
@@ -166,13 +166,13 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 </div>
 
 <script>
-/* ââ Data ââââââââââââââââââââââââââââââââââââââââââââ */
+/* -- Data -------------------------------------------- */
 const RAW_ROWS = {rows_json};
 let filteredRows = [...RAW_ROWS];
 let sortCol = "diff", sortAsc = false;
 let activeLeague = null, activeMarket = null;
 
-/* ââ Tab Switching âââââââââââââââââââââââââââââââââââ */
+/* -- Tab Switching ----------------------------------- */
 document.querySelectorAll('.tab-btn').forEach(btn => {{
   btn.addEventListener('click', () => {{
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -183,7 +183,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {{
   }});
 }});
 
-/* ââ League & Market Filters âââââââââââââââââââââââââ */
+/* -- League & Market Filters ------------------------- */
 (function buildFilters() {{
   const leagues = [...new Set(RAW_ROWS.map(r => r.league))].sort();
   const markets = [...new Set(RAW_ROWS.map(r => r.market))].sort();
@@ -218,7 +218,7 @@ function setActiveFilter(container, active) {{
   active.classList.add('active');
 }}
 
-/* ââ Filtering âââââââââââââââââââââââââââââââââââââââ */
+/* -- Filtering --------------------------------------- */
 function applyFilters() {{
   const q = document.getElementById('search').value.toLowerCase();
   filteredRows = RAW_ROWS.filter(r => {{
@@ -230,7 +230,7 @@ function applyFilters() {{
   doSort();
 }}
 
-/* ââ Sorting âââââââââââââââââââââââââââââââââââââââââ */
+/* -- Sorting ----------------------------------------- */
 document.querySelectorAll('#odds-table th').forEach(th => {{
   th.addEventListener('click', () => {{
     const col = th.dataset.col;
@@ -238,7 +238,7 @@ document.querySelectorAll('#odds-table th').forEach(th => {{
     else {{ sortCol = col; sortAsc = true; }}
     document.querySelectorAll('#odds-table th').forEach(h => h.classList.remove('sorted'));
     th.classList.add('sorted');
-    th.querySelector('.sort-arrow').textContent = sortAsc ? 'â²' : 'â¼';
+    th.querySelector('.sort-arrow').textContent = sortAsc ? '\u25B2' : '\u25BC';
     doSort();
   }});
 }});
@@ -252,8 +252,8 @@ function doSort() {{
       return sortAsc ? va - vb : vb - va;
     }}
     if (sortCol === 'bet9ja' || sortCol === 'sportybet') {{
-      va = va === 'â' ? null : parseFloat(va);
-      vb = vb === 'â' ? null : parseFloat(vb);
+      va = va === '\u2014' ? null : parseFloat(va);
+      vb = vb === '\u2014' ? null : parseFloat(vb);
       if (va === null && vb === null) return 0;
       if (va === null) return 1;
       if (vb === null) return -1;
@@ -266,19 +266,19 @@ function doSort() {{
   renderTable();
 }}
 
-/* ââ Render Table ââââââââââââââââââââââââââââââââââââ */
+/* -- Render Table ------------------------------------ */
 function renderTable() {{
   const tbody = document.getElementById('tbody');
   let html = '';
   for (const r of filteredRows) {{
     const diff = r.diff;
-    let diffCls = 'diff-zero', diffTxt = 'â';
+    let diffCls = 'diff-zero', diffTxt = '\u2014';
     if (diff !== null && diff !== undefined) {{
       diffTxt = (diff > 0 ? '+' : '') + diff.toFixed(3);
       diffCls = diff > 0 ? 'diff-pos' : diff < 0 ? 'diff-neg' : 'diff-zero';
     }}
-    const b9Cls = r.bet9ja === 'â' ? 'missing' : 'odds-cell';
-    const sbCls = r.sportybet === 'â' ? 'missing' : 'odds-cell';
+    const b9Cls = r.bet9ja === '\u2014' ? 'missing' : 'odds-cell';
+    const sbCls = r.sportybet === '\u2014' ? 'missing' : 'odds-cell';
     html += `<tr>
       <td class="league-cell">${{r.league}}</td>
       <td class="event-cell">${{r.event}}</td>
@@ -293,7 +293,7 @@ function renderTable() {{
   document.getElementById('row-count').textContent = `Showing ${{filteredRows.length}} of ${{RAW_ROWS.length}} rows`;
 }}
 
-/* ââ Accumulators ââââââââââââââââââââââââââââââââââââ */
+/* -- Accumulators ------------------------------------ */
 let accaLoaded = false;
 async function loadAccumulators() {{
   if (accaLoaded) return;
@@ -327,24 +327,24 @@ async function loadAccumulators() {{
       grid.innerHTML += `
         <div class="acca-card">
           <div class="acca-header">
-            <span class="acca-size">Acca <span>#${{idx+1}}</span> â ${{acca.size}} selections</span>
+            <span class="acca-size">Acca <span>#${{idx+1}}</span> &mdash; ${{acca.size}} selections</span>
           </div>
           <div class="acca-body">
             <ul class="sel-list">${{selHtml}}</ul>
             <div class="bookmaker-compare">
               <div class="bm-box bm-b9">
-                <div class="bm-name"><span>Bet9ja</span><span class="bm-source">${{b9.source === 'betslip' ? 'â Real' : b9.source === 'formula' ? 'ð Formula' : 'â Est.'}}</span></div>
+                <div class="bm-name"><span>Bet9ja</span><span class="bm-source">${{b9.source === 'betslip' ? '\u2713 Real' : b9.source === 'formula' ? '\ud83d\udcd0 Formula' : '\u2248 Est.'}}</span></div>
                 <div class="bm-row"><span class="bm-label">Combined Odds</span><span class="bm-val ${{bestOdds==='b9'?'best-val':''}}">${{b9.odds.toFixed(2)}}</span></div>
-                <div class="bm-row"><span class="bm-label">Base Win (<span class="naira">â¦</span>100)</span><span class="bm-val"><span class="naira">â¦</span>${{fmtN(b9.base_win)}}</span></div>
-                <div class="bm-row"><span class="bm-label">Bonus</span><span class="bm-val">${{b9.bonus_percent}}% (<span class="naira">â¦</span>${{fmtN(b9.bonus_amount)}})</span></div>
-                <div class="bm-row bm-total"><span class="bm-label">Total Win</span><span class="bm-val ${{bestTotal==='b9'?'best-val':''}}" style="font-size:.95rem"><span class="naira">â¦</span>${{fmtN(b9.total_win)}}</span></div>
+                <div class="bm-row"><span class="bm-label">Base Win (<span class="naira">&#8358;</span>100)</span><span class="bm-val"><span class="naira">&#8358;</span>${{fmtN(b9.base_win)}}</span></div>
+                <div class="bm-row"><span class="bm-label">Bonus</span><span class="bm-val">${{b9.bonus_percent}}% (<span class="naira">&#8358;</span>${{fmtN(b9.bonus_amount)}})</span></div>
+                <div class="bm-row bm-total"><span class="bm-label">Total Win</span><span class="bm-val ${{bestTotal==='b9'?'best-val':''}}" style="font-size:.95rem"><span class="naira">&#8358;</span>${{fmtN(b9.total_win)}}</span></div>
               </div>
               <div class="bm-box bm-sb">
-                <div class="bm-name"><span>SportyBet</span><span class="bm-source">${{sb.source === 'betslip' ? 'â Real' : 'â Est.'}}</span></div>
+                <div class="bm-name"><span>SportyBet</span><span class="bm-source">${{sb.source === 'betslip' ? '\u2713 Real' : '\u2248 Est.'}}</span></div>
                 <div class="bm-row"><span class="bm-label">Combined Odds</span><span class="bm-val ${{bestOdds==='sb'?'best-val':''}}">${{sb.odds.toFixed(2)}}</span></div>
-                <div class="bm-row"><span class="bm-label">Base Win (<span class="naira">â¦</span>100)</span><span class="bm-val"><span class="naira">â¦</span>${{fmtN(sb.base_win)}}</span></div>
-                <div class="bm-row"><span class="bm-label">Bonus</span><span class="bm-val">${{sb.bonus_percent}}% (<span class="naira">â¦</span>${{fmtN(sb.bonus_amount)}})</span></div>
-                <div class="bm-row bm-total"><span class="bm-label">Total Win</span><span class="bm-val ${{bestTotal==='sb'?'best-val':''}}" style="font-size:.95rem"><span class="naira">â¦</span>${{fmtN(sb.total_win)}}</span></div>
+                <div class="bm-row"><span class="bm-label">Base Win (<span class="naira">&#8358;</span>100)</span><span class="bm-val"><span class="naira">&#8358;</span>${{fmtN(sb.base_win)}}</span></div>
+                <div class="bm-row"><span class="bm-label">Bonus</span><span class="bm-val">${{sb.bonus_percent}}% (<span class="naira">&#8358;</span>${{fmtN(sb.bonus_amount)}})</span></div>
+                <div class="bm-row bm-total"><span class="bm-label">Total Win</span><span class="bm-val ${{bestTotal==='sb'?'best-val':''}}" style="font-size:.95rem"><span class="naira">&#8358;</span>${{fmtN(sb.total_win)}}</span></div>
               </div>
             </div>
           </div>
@@ -358,18 +358,18 @@ async function loadAccumulators() {{
 
 function fmtN(n) {{ return n.toLocaleString('en-NG', {{minimumFractionDigits:2, maximumFractionDigits:2}}); }}
 
-/* ââ Refresh âââââââââââââââââââââââââââââââââââââââââ */
+/* -- Refresh ----------------------------------------- */
 function triggerRefresh() {{
   fetch('/api/refresh').then(() => {{
-    document.getElementById('status').textContent = 'Refreshingâ¦';
+    document.getElementById('status').textContent = 'Refreshing\u2026';
     setTimeout(() => location.reload(), 15000);
   }});
 }}
 
-/* ââ Auto-Refresh ââââââââââââââââââââââââââââââââââââ */
+/* -- Auto-Refresh ------------------------------------ */
 setTimeout(() => location.reload(), 10 * 60 * 1000);
 
-/* ââ Initial Render ââââââââââââââââââââââââââââââââââ */
+/* -- Initial Render ---------------------------------- */
 doSort();
 </script>
 </body>
