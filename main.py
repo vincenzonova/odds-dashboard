@@ -64,7 +64,11 @@ users = {
     "admin": {
         "password_hash": bcrypt.hashpw(b"admin123", bcrypt.gensalt()).decode(),
         "role": "admin",
-    }
+    },
+    "vinz": {
+        "password_hash": bcrypt.hashpw(b"odds2026", bcrypt.gensalt()).decode(),
+        "role": "admin",
+    },
 }
 
 scheduler = None
@@ -155,94 +159,79 @@ def fuzzy_match_event(bet9ja_event: str, other_event: str, threshold: float = 0.
 
 def merge_odds(raw_data: dict) -> list:
     """
-    Merge odds from all 5 bookmakers using Bet9ja as primary reference.
-    Returns list of dicts with odds from all available bookmakers.
+    Merge odds from all 5 bookmakers using ANY available data.
+    Uses a unified event index built from all bookmakers, so data shows
+    even if some bookmakers return nothing (e.g. geo-blocked).
     """
-    bet9ja_events = {f"{e['league']}|{e['event']}": e for e in raw_data["bet9ja"]}
+    BOOKMAKERS = ["bet9ja", "sportybet", "betking", "msport", "betano"]
 
+    # Build a unified event index: key -> {league, event, markets: {market: {sign: {bookmaker: odds}}}}
+    unified = {}
+
+    for bk_name in BOOKMAKERS:
+        for ev in raw_data.get(bk_name, []):
+            league = ev.get("league", "")
+            event_name = ev.get("event", "")
+            if not event_name:
+                continue
+
+            # Try to find existing key via fuzzy match
+            matched_key = None
+            for existing_key in unified:
+                existing_event = unified[existing_key]["event"]
+                if fuzzy_match_event(existing_event, event_name):
+                    matched_key = existing_key
+                    break
+
+            if matched_key is None:
+                matched_key = f"{league}|{event_name}"
+                unified[matched_key] = {
+                    "league": league,
+                    "event": event_name,
+                    "markets": {},
+                }
+
+            # Add this bookmaker's odds into the unified entry
+            for market, signs in ev.get("markets", {}).items():
+                if market not in unified[matched_key]["markets"]:
+                    unified[matched_key]["markets"][market] = {}
+                for sign, odds_str in signs.items():
+                    if sign not in unified[matched_key]["markets"][market]:
+                        unified[matched_key]["markets"][market][sign] = {}
+                    try:
+                        odds_val = float(str(odds_str).replace(",", "."))
+                        unified[matched_key]["markets"][market][sign][bk_name] = odds_val
+                    except (ValueError, AttributeError, TypeError):
+                        pass
+
+    # Now flatten the unified index into rows
     merged_rows = []
 
-    for bet9ja_key, bet9ja_event in bet9ja_events.items():
-        league, event_name = bet9ja_key.split("|")
+    for key, entry in unified.items():
+        league = entry["league"]
+        event_name = entry["event"]
 
-        for market in bet9ja_event.get("markets", {}).keys():
-            for sign, odds_str in bet9ja_event["markets"][market].items():
-                try:
-                    bet9ja_odds = float(odds_str.replace(",", "."))
-                except (ValueError, AttributeError):
-                    continue
-
+        for market, signs in entry["markets"].items():
+            for sign, bk_odds in signs.items():
                 row = {
                     "league": league,
                     "event": event_name,
                     "market": market,
                     "sign": sign,
-                    "bet9ja": f"{bet9ja_odds:.2f}",
                 }
 
-                all_odds_values = [bet9ja_odds]
+                all_odds_values = []
 
-                # Find matching odds from SportyBet
-                for sb_event in raw_data["sportybet"]:
-                    if fuzzy_match_event(event_name, sb_event.get("event", "")):
-                        sb_markets = sb_event.get("markets", {})
-                        if market in sb_markets and sign in sb_markets[market]:
-                            try:
-                                sb_odds = float(sb_markets[market][sign].replace(",", "."))
-                                row["sportybet"] = f"{sb_odds:.2f}"
-                                all_odds_values.append(sb_odds)
-                            except (ValueError, AttributeError):
-                                row["sportybet"] = "—"
-                        break
-
-                # Find matching odds from BetKing
-                for bk_event in raw_data["betking"]:
-                    if fuzzy_match_event(event_name, bk_event.get("event", "")):
-                        bk_markets = bk_event.get("markets", {})
-                        if market in bk_markets and sign in bk_markets[market]:
-                            try:
-                                bk_odds = float(bk_markets[market][sign].replace(",", "."))
-                                row["betking"] = f"{bk_odds:.2f}"
-                                all_odds_values.append(bk_odds)
-                            except (ValueError, AttributeError):
-                                row["betking"] = "—"
-                        break
-
-                # Find matching odds from MSport
-                for ms_event in raw_data["msport"]:
-                    if fuzzy_match_event(event_name, ms_event.get("event", "")):
-                        ms_markets = ms_event.get("markets", {})
-                        if market in ms_markets and sign in ms_markets[market]:
-                            try:
-                                ms_odds = float(ms_markets[market][sign].replace(",", "."))
-                                row["msport"] = f"{ms_odds:.2f}"
-                                all_odds_values.append(ms_odds)
-                            except (ValueError, AttributeError):
-                                row["msport"] = "—"
-                        break
-
-                # Find matching odds from Betano
-                for bn_event in raw_data["betano"]:
-                    if fuzzy_match_event(event_name, bn_event.get("event", "")):
-                        bn_markets = bn_event.get("markets", {})
-                        if market in bn_markets and sign in bn_markets[market]:
-                            try:
-                                bn_odds = float(bn_markets[market][sign].replace(",", "."))
-                                row["betano"] = f"{bn_odds:.2f}"
-                                all_odds_values.append(bn_odds)
-                            except (ValueError, AttributeError):
-                                row["betano"] = "—"
-                        break
-
-                # Fill missing bookmakers with "—"
-                for bookmaker in ["sportybet", "betking", "msport", "betano"]:
-                    if bookmaker not in row:
-                        row[bookmaker] = "—"
+                for bk_name in BOOKMAKERS:
+                    if bk_name in bk_odds:
+                        row[bk_name] = f"{bk_odds[bk_name]:.2f}"
+                        all_odds_values.append(bk_odds[bk_name])
+                    else:
+                        row[bk_name] = "\u2014"
 
                 # Calculate difference
-                numeric_odds = [v for v in all_odds_values if isinstance(v, float)]
-                if numeric_odds:
-                    row["diff"] = max(numeric_odds) - min(numeric_odds)
+                if len(all_odds_values) >= 2:
+                    row["diff"] = round(max(all_odds_values) - min(all_odds_values), 2)
                 else:
                     row["diff"] = 0.0
 
@@ -621,7 +610,7 @@ async function doLogin(){
   const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({username:document.getElementById('user').value,password:document.getElementById('pass').value})});
   const d=await r.json();
-  if(r.ok){localStorage.setItem('token',d.token);window.location.href='/dashboard';}
+  if(r.ok){localStorage.setItem('token',d.access_token);window.location.href='/dashboard';}
   else{e.textContent=d.detail||'Login failed';e.style.display='block';}
 }
 document.getElementById('pass').addEventListener('keypress',e=>{if(e.key==='Enter')doLogin();});
