@@ -118,7 +118,7 @@ async def do_refresh():
             print(f"  [Bet9ja] Scraper failed: {e}")
 
         # SportyBet (API) — always attempt
-        sb_events = scrape_sportybet(max_matches=MAX_MATCHES)
+        sb_events = await scrape_sportybet(max_matches=MAX_MATCHES)
 
         if bet9ja_matches and sb_events:
             # Full comparison mode
