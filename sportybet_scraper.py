@@ -1,6 +1,11 @@
 """
 SportyBet Scraper — uses Playwright to render the page and extract odds from DOM.
 Needed because SportyBet's API requires session cookies set by their JS framework.
+
+Extracts:
+  • 1X2 odds (from the default "3 Way & O/U" tab)
+  • Over/Under 2.5 (only when the displayed spread is actually 2.5)
+  • Double Chance (by clicking the "Double Chance" tab)
 """
 import asyncio
 from playwright.async_api import async_playwright
@@ -18,7 +23,29 @@ TOURNAMENT_URLS = {
     "Europa League":  f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:679",
 }
 
-JS_EXTRACT = """
+# ── JS extraction for "3 Way & O/U" tab ────────────────────────
+# Returns 1X2 odds + O/U odds only when spread == 2.5
+JS_EXTRACT_MAIN = """
+() => {
+    const rows = document.querySelectorAll('.match-row');
+    const matches = [];
+    for (const row of rows) {
+        const home = row.querySelector('.home-team')?.textContent?.trim() || '';
+        const away = row.querySelector('.away-team')?.textContent?.trim() || '';
+        const oddsEls = [...row.querySelectorAll('.m-outcome-odds')];
+        const odds = oddsEls.map(o => o.textContent.trim());
+        const spread = row.querySelector('.af-select-input')?.textContent?.trim() || '';
+        if (home && away && odds.length >= 3) {
+            matches.push({ home, away, odds, spread });
+        }
+    }
+    return matches;
+}
+"""
+
+# ── JS extraction for "Double Chance" tab ───────────────────────
+# Returns 3 odds: 1X, 12, X2
+JS_EXTRACT_DC = """
 () => {
     const rows = document.querySelectorAll('.match-row');
     const matches = [];
@@ -36,16 +63,31 @@ JS_EXTRACT = """
 """
 
 
-def _build_odds_dict(odds_list: list[str]) -> dict:
+def _build_odds_dict(main_data: dict) -> dict:
+    """Build odds dict from 3 Way & O/U tab data (includes spread check)."""
+    odds_list = main_data["odds"]
+    spread = main_data.get("spread", "")
     result = {}
     if len(odds_list) >= 3:
         result["1X2"] = {"1": odds_list[0], "X": odds_list[1], "2": odds_list[2]}
-    if len(odds_list) >= 5:
+    # Only include O/U if spread is exactly 2.5
+    if len(odds_list) >= 5 and spread.strip() == "2.5":
         result["O/U 2.5"] = {"Over": odds_list[3], "Under": odds_list[4]}
     return result
 
 
-# ── Team name normalization ──────────────────────────────────────────────────
+def _add_dc_odds(existing_odds: dict, dc_odds_list: list[str]) -> dict:
+    """Add Double Chance odds to an existing odds dict."""
+    if len(dc_odds_list) >= 3:
+        existing_odds["Double Chance"] = {
+            "1X": dc_odds_list[0],
+            "12": dc_odds_list[1],
+            "X2": dc_odds_list[2],
+        }
+    return existing_odds
+
+
+# ── Team name normalization ──────────────────────────────────────
 # Common abbreviations/aliases between Bet9ja and SportyBet
 TEAM_ALIASES = {
     "atl. madrid": "atletico madrid",
@@ -108,6 +150,9 @@ TEAM_ALIASES = {
     "sunderland afc": "sunderland",
     "brighton & hove albion": "brighton",
     "brighton hove": "brighton",
+    "fc torino": "torino",
+    "us lecce": "lecce",
+    "hellas verona": "verona",
 }
 
 
@@ -168,6 +213,75 @@ def fuzzy_match(name_a: str, name_b: str, threshold: float = 0.70) -> bool:
     return False
 
 
+async def _scrape_league(page, league_name: str, url: str, seen: set, max_matches: int, current_count: int) -> list[dict]:
+    """Scrape a single league: main tab (1X2 + O/U 2.5) then Double Chance tab."""
+    results = []
+
+    print(f"  [SportyBet] Loading {league_name}...")
+    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    await page.wait_for_selector(".match-row", timeout=15000)
+    await page.wait_for_timeout(1000)
+
+    # ── Step 1: Scrape "3 Way & O/U" tab (default) ──
+    raw_main = await page.evaluate(JS_EXTRACT_MAIN)
+
+    # Build initial results with 1X2 + conditional O/U 2.5
+    league_matches = []
+    skipped_ou = 0
+    for m in raw_main:
+        key = f"{m['home']}-{m['away']}"
+        if key in seen:
+            continue
+        seen.add(key)
+        odds = _build_odds_dict(m)
+        if odds:
+            spread = m.get("spread", "")
+            if spread.strip() != "2.5" and len(m["odds"]) >= 5:
+                skipped_ou += 1
+            league_matches.append({
+                "event_id": key,
+                "event": f"{m['home']} - {m['away']}",
+                "league": league_name,
+                "odds": odds,
+            })
+        if current_count + len(league_matches) >= max_matches:
+            break
+
+    if skipped_ou > 0:
+        print(f"  [SportyBet] {league_name}: skipped O/U for {skipped_ou} matches (spread != 2.5)")
+
+    # ── Step 2: Click "Double Chance" tab and scrape ──
+    try:
+        dc_tab = page.locator('.market-item', has_text='Double Chance')
+        if await dc_tab.count() > 0:
+            await dc_tab.first.click()
+            await page.wait_for_timeout(1500)  # wait for odds to update
+
+            raw_dc = await page.evaluate(JS_EXTRACT_DC)
+
+            # Build a lookup by home-away key
+            dc_lookup = {}
+            for m in raw_dc:
+                key = f"{m['home']}-{m['away']}"
+                dc_lookup[key] = m["odds"]
+
+            # Merge DC odds into existing results
+            dc_added = 0
+            for match in league_matches:
+                key = match["event_id"]
+                if key in dc_lookup:
+                    _add_dc_odds(match["odds"], dc_lookup[key])
+                    dc_added += 1
+
+            print(f"  [SportyBet] {league_name}: +{len(league_matches)} matches, {dc_added} with DC odds")
+        else:
+            print(f"  [SportyBet] {league_name}: +{len(league_matches)} matches (no DC tab found)")
+    except Exception as e:
+        print(f"  [SportyBet] {league_name}: +{len(league_matches)} matches (DC scrape failed: {e})")
+
+    return league_matches
+
+
 async def scrape_sportybet(max_matches: int = 50) -> list[dict]:
     results = []
     seen = set()
@@ -187,30 +301,10 @@ async def scrape_sportybet(max_matches: int = 50) -> list[dict]:
             if len(results) >= max_matches:
                 break
             try:
-                print(f"  [SportyBet] Loading {league_name}...")
-                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_selector(".match-row", timeout=15000)
-                await page.wait_for_timeout(1000)
-                raw = await page.evaluate(JS_EXTRACT)
-
-                added = 0
-                for m in raw:
-                    key = f"{m['home']}-{m['away']}"
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    odds = _build_odds_dict(m["odds"])
-                    if odds:
-                        results.append({
-                            "event_id": key,
-                            "event": f"{m['home']} - {m['away']}",
-                            "league": league_name,
-                            "odds": odds,
-                        })
-                        added += 1
-                    if len(results) >= max_matches:
-                        break
-                print(f"  [SportyBet] {league_name}: +{added} matches")
+                league_matches = await _scrape_league(
+                    page, league_name, url, seen, max_matches, len(results)
+                )
+                results.extend(league_matches)
             except Exception as e:
                 print(f"  [SportyBet] {league_name} error: {e}")
                 continue
