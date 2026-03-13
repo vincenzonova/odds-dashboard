@@ -316,7 +316,7 @@ async
             console.error('Regenerate failed:', err);
           }});
       }}
-      function loadAccumulators() {{
+      async function loadAccumulators() {{
   if (accaLoaded) return;
   try {{
     const res = await fetch('/api/accumulators');
