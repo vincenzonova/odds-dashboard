@@ -13,6 +13,8 @@ import os
 import sqlite3
 import hashlib
 import secrets
+import random
+import re
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -143,7 +145,41 @@ async def get_current_user(request: Request) -> str:
 
 
 # ── Accumulator Logic ────────────────────────────────────────────
-def build_accumulator_selections(rows: list[dict], name_map: dict, raw_bet9ja: list = None) -> list[dict]:
+def _parse_event_date(raw: str):
+    """Parse various date formats from Bet9ja API into datetime."""
+    if not raw:
+        return None
+    s = str(raw).strip()
+    # .NET JSON date: /Date(1742234400000)/
+    m = re.match(r'/Date\((\d+)\)/', s)
+    if m:
+        return datetime.fromtimestamp(int(m.group(1)) / 1000)
+    # Pure unix timestamp
+    try:
+        ts = float(s)
+        if ts > 1e12:
+            ts /= 1000
+        if 1e9 < ts < 2e10:
+            return datetime.fromtimestamp(ts)
+    except (ValueError, TypeError):
+        pass
+    # Try common string formats
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M",
+        "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M",
+        "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M",
+        "%m/%d/%Y %H:%M:%S",
+    ):
+        try:
+            return datetime.strptime(s[:len(fmt)+4], fmt)
+        except (ValueError, TypeError):
+            continue
+    print(f"  [DateParse] Unknown date format: {s[:50]}")
+    return None
+
+
+def build_accumulator_selections(rows: list[dict], name_map: dict, raw_bet9ja: list = None, shuffle: bool = False) -> list[dict]:
     """
     Build a pool of accumulator-worthy selections from the odds rows.
     Returns raw accumulators (without bonus/win — those get filled by betslip checker).
@@ -157,7 +193,7 @@ def build_accumulator_selections(rows: list[dict], name_map: dict, raw_bet9ja: l
         for m in raw_bet9ja:
             st = m.get("start_time", "")
             if st:
-                event_dates[m["event"]] = st
+                event_dates[m["event"]] = _parse_event_date(st)
     now = datetime.now()
     cutoff = now + timedelta(hours=48)
 
@@ -179,13 +215,9 @@ def build_accumulator_selections(rows: list[dict], name_map: dict, raw_bet9ja: l
         event = row["event"]
 
         # Skip events beyond 48h cutoff
-        if event in event_dates:
-            try:
-                evt_dt = datetime.strptime(event_dates[event][:16], "%Y-%m-%dT%H:%M")
-                if evt_dt > cutoff:
-                    continue
-            except (ValueError, TypeError):
-                pass
+        evt_dt = event_dates.get(event)
+        if evt_dt and evt_dt > cutoff:
+            continue
 
         sign = row["sign"]
         names = name_map.get(event, {})
@@ -203,11 +235,18 @@ def build_accumulator_selections(rows: list[dict], name_map: dict, raw_bet9ja: l
             "b9_away": names.get("b9_away", ""),
         })
 
-    # Build pool sorted by odds ascending (safer bets first)
+    # Build pool: pick one selection per event (best or random)
     all_selections = []
-    for event, sels in sorted(event_selections.items()):
-        all_selections.extend(sels)
-    all_selections.sort(key=lambda s: s["bet9ja"])
+    event_list = list(event_selections.items())
+    if shuffle:
+        random.shuffle(event_list)
+    for event, sels in event_list:
+        if shuffle:
+            all_selections.append(random.choice(sels))
+        else:
+            all_selections.append(sels[0])
+    if not shuffle:
+        all_selections.sort(key=lambda s: s["bet9ja"])
 
     if len(all_selections) < 3:
         return []
@@ -215,18 +254,13 @@ def build_accumulator_selections(rows: list[dict], name_map: dict, raw_bet9ja: l
     # Build accumulators: 2x each size
     accumulator_sizes = [3, 5, 8, 10, 15]
     accumulators = []
-
     for size in accumulator_sizes:
         if len(all_selections) < size:
             continue
-
-        # First accumulator: first N selections
         accumulators.append({
             "size": size,
             "selections": all_selections[:size],
         })
-
-        # Second accumulator: next N selections (if available)
         if len(all_selections) >= size * 2:
             accumulators.append({
                 "size": size,
@@ -251,16 +285,29 @@ async def compute_accumulators_with_betslip(
 
     if sb_page:
         # Use the full betslip checker for real amounts
-        return await check_all_accumulators(sb_page, b9_page, accumulators, stake)
+        raw_results = await check_all_accumulators(sb_page, b9_page, accumulators, stake)
+        # Validate SB results: if odds are off >20% from expected, use formula
+        for i, res in enumerate(raw_results):
+            sels = accumulators[i]["selections"]
+            expected_sb = 1.0
+            for s in sels:
+                expected_sb *= s.get("sportybet", s.get("odds", 1.0))
+            actual_sb = res.get("sportybet", {}).get("odds", 0)
+            if actual_sb <= 0 or abs(actual_sb - expected_sb) / expected_sb > 0.20:
+                print(f"  [Validation] Acca #{i+1}: SB odds {actual_sb} vs expected {expected_sb:.2f} -- using formula")
+                res["sportybet"] = _sportybet_formula_fallback(sels, stake)
+            # Bet9ja always uses formula (geo-blocked) - label as calculated
+            res["bet9ja"] = calculate_bet9ja_returns(sels, stake)
+            res["bet9ja"]["source"] = "calculated"
+        return raw_results
 
     # Fallback: formula-based for both
     results = []
     for acca in accumulators:
         sels = acca["selections"]
         b9 = calculate_bet9ja_returns(sels, stake)
-        b9["source"] = "formula"
+        b9["source"] = "calculated"
         sb = _sportybet_formula_fallback(sels, stake)
-
         results.append({
             "size": acca["size"],
             "selections": [{"event": s["event"], "sign": s["sign"], "bet9ja": s.get("bet9ja", 0), "sportybet": s.get("sportybet", 0)} for s in sels],
@@ -636,6 +683,29 @@ async def api_history(event: str = "", market: str = "", current_user: str = Dep
     return JSONResponse({
         "count": len(rows),
         "rows": rows,
+    })
+
+
+@app.get("/api/regenerate")
+async def api_regenerate(current_user: str = Depends(get_current_user)):
+    """Regenerate accumulators with random selections from the same pool."""
+    rows = cache.get("rows", [])
+    name_map = cache.get("match_name_map", {})
+    raw_bet9ja = cache.get("raw_bet9ja", [])
+    raw_accas = build_accumulator_selections(rows, name_map, raw_bet9ja=raw_bet9ja, shuffle=True)
+    if raw_accas:
+        try:
+            cache["accumulators"] = await compute_accumulators_with_betslip(
+                raw_accas, sb_page=None, b9_page=None, stake=100,
+            )
+        except Exception as e:
+            print(f"[Regenerate] Error: {e}")
+            cache["accumulators"] = []
+    else:
+        cache["accumulators"] = []
+    return JSONResponse({
+        "count": len(cache.get("accumulators", [])),
+        "accumulators": cache.get("accumulators", []),
     })
 
 
