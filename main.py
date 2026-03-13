@@ -712,3 +712,5 @@ async def api_regenerate(current_user: str = Depends(get_current_user)):
 @app.get("/health")
 async def health():
     return {"status": "ok", "last_updated": cache["last_updated"]}
+
+# v2.1 - Regenerate + Calculated labels
