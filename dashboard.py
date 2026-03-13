@@ -161,6 +161,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
   <div class="acca-loading" id="acca-loading">Loading accumulators&hellip;</div>
   
   <div style="text-align:right;margin:10px 0"><button onclick="regenerateAccas()" style="background:#6366f1;color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:.9rem" id="regen-btn">&#x1F504; Regenerate</button></div>
+  
   <div class="acca-grid" id="acca-grid" style="display:none"></div>
   <div class="acca-empty" id="acca-empty" style="display:none">
     <p>No accumulators available yet. Need at least 3 matched events with 1X2 odds between 1.20-1.80 from both bookmakers.</p>
@@ -298,23 +299,23 @@ function renderTable() {{
 /* -- Accumulators ------------------------------------ */
 let accaLoaded = false;
 async 
-      function regenerateAccas() {
+      function regenerateAccas() {{
         const btn = document.getElementById('regen-btn');
         btn.disabled = true;
         btn.textContent = 'Regenerating...';
         fetch('/api/regenerate')
           .then(r => r.json())
-          .then(data => {
+          .then(data => {{
             btn.disabled = false;
             btn.innerHTML = '&#x1F504; Regenerate';
             loadAccumulators();
-          })
-          .catch(err => {
+          }})
+          .catch(err => {{
             btn.disabled = false;
             btn.innerHTML = '&#x1F504; Regenerate';
             console.error('Regenerate failed:', err);
-          });
-      }
+          }});
+      }}
       function loadAccumulators() {{
   if (accaLoaded) return;
   try {{
