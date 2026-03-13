@@ -13,7 +13,7 @@ import os
 import sqlite3
 import hashlib
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -143,7 +143,7 @@ async def get_current_user(request: Request) -> str:
 
 
 # ── Accumulator Logic ────────────────────────────────────────────
-def build_accumulator_selections(rows: list[dict], name_map: dict) -> list[dict]:
+def build_accumulator_selections(rows: list[dict], name_map: dict, raw_bet9ja: list = None) -> list[dict]:
     """
     Build a pool of accumulator-worthy selections from the odds rows.
     Returns raw accumulators (without bonus/win — those get filled by betslip checker).
@@ -151,6 +151,16 @@ def build_accumulator_selections(rows: list[dict], name_map: dict) -> list[dict]
     Each accumulator: {size, selections: [{event, sign, bet9ja, sportybet,
                         league, sb_home, sb_away, b9_home, b9_away}]}
     """
+    # Build date lookup from raw_bet9ja for 48h filtering
+    event_dates = {}
+    if raw_bet9ja:
+        for m in raw_bet9ja:
+            st = m.get("start_time", "")
+            if st:
+                event_dates[m["event"]] = st
+    now = datetime.now()
+    cutoff = now + timedelta(hours=48)
+
     # Extract matched events where both bookmakers have 1X2 odds 1.20-1.80
     event_selections = {}
     for row in rows:
@@ -167,6 +177,16 @@ def build_accumulator_selections(rows: list[dict], name_map: dict) -> list[dict]
             continue
 
         event = row["event"]
+
+        # Skip events beyond 48h cutoff
+        if event in event_dates:
+            try:
+                evt_dt = datetime.strptime(event_dates[event][:16], "%Y-%m-%dT%H:%M")
+                if evt_dt > cutoff:
+                    continue
+            except (ValueError, TypeError):
+                pass
+
         sign = row["sign"]
         names = name_map.get(event, {})
         if event not in event_selections:
@@ -243,7 +263,7 @@ async def compute_accumulators_with_betslip(
 
         results.append({
             "size": acca["size"],
-            "selections": [{"event": s["event"], "sign": s["sign"]} for s in sels],
+            "selections": [{"event": s["event"], "sign": s["sign"], "bet9ja": s.get("bet9ja", 0), "sportybet": s.get("sportybet", 0)} for s in sels],
             "bet9ja": b9,
             "sportybet": sb,
         })
@@ -432,7 +452,7 @@ async def do_refresh():
 
         # Build accumulators with real betslip data
         name_map = cache.get("match_name_map", {})
-        raw_accas = build_accumulator_selections(rows, name_map)
+        raw_accas = build_accumulator_selections(rows, name_map, raw_bet9ja=bet9ja_matches)
         if raw_accas:
             print(f"[Refresh] Building {len(raw_accas)} accumulators with betslip checker...")
             try:
