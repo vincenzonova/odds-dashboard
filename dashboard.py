@@ -298,8 +298,7 @@ function renderTable() {{
 
 /* -- Accumulators ------------------------------------ */
 let accaLoaded = false;
-async 
-      function regenerateAccas() {{
+async function regenerateAccas() {{
         const btn = document.getElementById('regen-btn');
         btn.disabled = true;
         btn.textContent = 'Regenerating...';
