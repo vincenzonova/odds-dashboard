@@ -357,7 +357,7 @@ async
             <ul class="sel-list">${{selHtml}}</ul>
             <div class="bookmaker-compare">
               <div class="bm-box bm-b9">
-                <div class="bm-name"><span>Bet9ja</span><span class="bm-source">${b9.source === 'betslip' ? '\u2713 Real' : b9.source === 'calculated' ? '\u2713 Calculated' : '\u2248 Est.'}}</span></div>
+                <div class="bm-name"><span>Bet9ja</span><span class="bm-source">${{b9.source === 'betslip' ? '\u2713 Real' : b9.source === 'calculated' ? '\u2713 Calculated' : '\u2248 Est.'}}</span></div>
                 <div class="bm-row"><span class="bm-label">Combined Odds</span><span class="bm-val ${{bestOdds==='b9'?'best-val':''}}">${{b9.odds.toFixed(2)}}</span></div>
                 <div class="bm-row"><span class="bm-label">Base Win (<span class="naira">&#8358;</span>100)</span><span class="bm-val"><span class="naira">&#8358;</span>${{fmtN(b9.base_win)}}</span></div>
                 <div class="bm-row"><span class="bm-label">Bonus</span><span class="bm-val">${{b9.bonus_percent}}% (<span class="naira">&#8358;</span>${{fmtN(b9.bonus_amount)}})</span></div>
