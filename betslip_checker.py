@@ -83,6 +83,7 @@ JS_SB_SET_STAKE = """
 JS_SB_READ_BETSLIP = """
 () => {
     const result = {};
+    // Method 1: structured labels
     const labels = document.querySelectorAll('.m-label');
     for (const label of labels) {
         const text = label.textContent.trim();
@@ -91,13 +92,25 @@ JS_SB_READ_BETSLIP = """
         const val = nextEl.textContent.trim().replace(/,/g, '');
         if (text === 'Odds' || text.includes('Odds')) result.odds = val;
         if (text === 'Total Stake') result.total_stake = val;
-        if (text === 'Max bonus' || text.includes('bonus')) result.max_bonus = val;
+        if (text === 'Max bonus' || text.includes('bonus') || text.includes('Bonus')) result.max_bonus = val;
     }
-    // Potential Win is in a bold m-value
     const potWinLabel = [...labels].find(l => l.textContent.includes('Potential Win'));
     if (potWinLabel) {
         const potWinVal = potWinLabel.nextElementSibling;
         if (potWinVal) result.potential_win = potWinVal.textContent.trim().replace(/,/g, '');
+    }
+    // Method 2: fallback - scan all text in betslip panel
+    if (!result.odds || result.odds === '0') {
+        const panel = document.querySelector('.m-bet-slip, .m-betslip, [class*="betslip"], [class*="bet-slip"]');
+        if (panel) {
+            const allText = panel.innerText || '';
+            const oddsMatch = allText.match(/(?:Total\s*Odds|Odds)[:\s]*([\d,.]+)/i);
+            if (oddsMatch) result.odds = oddsMatch[1].replace(/,/g, '');
+            const bonusMatch = allText.match(/(?:Max\s*bonus|Bonus)[:\s]*([\d,.]+)/i);
+            if (bonusMatch) result.max_bonus = bonusMatch[1].replace(/,/g, '');
+            const winMatch = allText.match(/(?:Potential\s*Win|Est\.?\s*Win)[:\s]*([\d,.]+)/i);
+            if (winMatch) result.potential_win = winMatch[1].replace(/,/g, '');
+        }
     }
     // Count selections
     const selections = document.querySelectorAll('.m-bet-item, [class*="bet-item"]');
@@ -238,17 +251,17 @@ def calculate_bet9ja_returns(selections: list[dict], stake: float = 100) -> dict
         return {"odds": 0, "base_win": 0, "bonus_percent": 0, "bonus_amount": 0, "potential_win": 0}
 
     combined_odds = 1.0
-    all_qualify = True
+    qualifying_count = 0
     for sel in selections:
         odds = sel.get("bet9ja", sel.get("odds", 1.0))
         if isinstance(odds, str):
             odds = float(odds)
         combined_odds *= odds
-        if odds < 1.20:
-            all_qualify = False
+        if odds >= 1.20:
+            qualifying_count += 1
 
     base_win = stake * combined_odds
-    bonus_pct = calculate_bet9ja_bonus(len(selections), all_qualify)
+    bonus_pct = calculate_bet9ja_bonus(qualifying_count, qualifying_count > 0)
     bonus_amount = base_win * (bonus_pct / 100)
     potential_win = base_win + bonus_amount
 
@@ -542,7 +555,7 @@ async def check_all_accumulators(
         results.append({
             "size": size,
             "selections": [
-                {"event": s["event"], "sign": s["sign"]}
+                {"event": s["event"], "sign": s["sign"], "bet9ja": s.get("bet9ja", 0), "sportybet": s.get("sportybet", 0)}
                 for s in sels
             ],
             "bet9ja": b9_result,
