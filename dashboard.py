@@ -1,9 +1,9 @@
 """
-Dashboard HTML builder - single-file HTML with:
+Dashboard HTML builder - 5-bookmaker odds dashboard with:
   - Tab navigation: Odds Dashboard | Bet Comparison
-  - Sortable, filterable odds table with search + league/market filters
-  - Accumulator cards with side-by-side Bet9ja vs SportyBet breakdown
-  - Logout button in header
+  - Sortable, filterable odds table with 5 bookmakers + checkbox selection
+  - Selection bar with "Generate Comparison" button for custom comparisons
+  - Accumulator cards with 5 bookmaker boxes + responsive grid
   - Auto-refresh every 10 minutes
   - Dark theme throughout
 """
@@ -11,16 +11,38 @@ Dashboard HTML builder - single-file HTML with:
 
 def build_dashboard_html(cache: dict) -> str:
     import json
-    rows_json = json.dumps(cache.get("rows", []))
-    last_updated = cache.get("last_updated", "&mdash;")
-    status = cache.get("status", "Loading&hellip;")
+    from datetime import datetime
+
+    # Extract data from cache
+    rows = cache.get("rows", [])
+    last_updated = cache.get("last_updated", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    status = cache.get("status", "Live")
+
+    # Convert rows to JSON for JavaScript
+    rows_json = json.dumps(rows)
+
+    # Extract unique leagues and markets
+    leagues = sorted(set(row.get("league", "Unknown") for row in rows if row.get("league")))
+    markets = sorted(set(row.get("market", "Unknown") for row in rows if row.get("market")))
+
+    # Build league filter buttons
+    league_buttons = "\n".join(
+        f'<button class="filter-btn" data-league="{league}">{league}</button>'
+        for league in leagues
+    )
+
+    # Build market filter buttons
+    market_buttons = "\n".join(
+        f'<button class="filter-btn" data-market="{market}">{market}</button>'
+        for market in markets
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Odds Dashboard</title>
+<title>Odds Dashboard - 5 Bookmakers</title>
 <style>
 /* -- Reset & Base ---------------------------------- */
 *{{margin:0;padding:0;box-sizing:border-box}}
@@ -53,6 +75,14 @@ body{{font-family:'Inter','Segoe UI',system-ui,sans-serif;background:#0f1117;col
 .filter-group{{display:flex;flex-wrap:wrap;gap:6px;align-items:center}}
 .filter-label{{font-size:.72rem;color:#475569;text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-right:4px}}
 
+/* -- Selection Bar ---------------------------------- */
+.selection-bar{{display:none;background:#1a1d27;border:2px solid #6366f1;border-radius:8px;padding:12px 16px;margin-bottom:16px;align-items:center;gap:16px;position:sticky;top:24px;z-index:50}}
+.selection-bar.active{{display:flex}}
+.selection-count{{font-weight:600;color:#6366f1;font-size:.9rem;min-width:120px}}
+.compare-btn{{padding:6px 16px;background:#6366f1;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.8rem;font-weight:600;transition:background .15s}}
+.compare-btn:hover{{background:#4f46e5}}
+.compare-btn:disabled{{background:#475569;cursor:not-allowed;opacity:.5}}
+
 /* -- Table ------------------------------------------ */
 .table-wrap{{overflow-x:auto;border-radius:10px;border:1px solid #2d3144}}
 table{{width:100%;border-collapse:collapse;font-size:.82rem}}
@@ -62,11 +92,14 @@ th .sort-arrow{{margin-left:4px;font-size:.65rem;opacity:.4}}
 th.sorted .sort-arrow{{opacity:1;color:#6366f1}}
 td{{padding:9px 12px;border-bottom:1px solid rgba(45,49,68,.4);white-space:nowrap}}
 tr:hover td{{background:rgba(99,102,241,.05)}}
+.checkbox-cell{{text-align:center;width:40px}}
+.checkbox-cell input{{cursor:pointer;accent-color:#6366f1}}
 .league-cell{{color:#64748b;font-size:.75rem}}
 .event-cell{{font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis}}
 .market-cell{{color:#94a3b8}}
 .sign-cell{{font-weight:700;color:#e2e8f0}}
 .odds-cell{{font-variant-numeric:tabular-nums}}
+.odds-cell.best{{background:rgba(34,197,94,.15);color:#22c55e;font-weight:700}}
 .diff-pos{{color:#22c55e;font-weight:700}}
 .diff-neg{{color:#ef4444;font-weight:700}}
 .diff-zero{{color:#64748b}}
@@ -82,25 +115,28 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 .sel-list{{list-style:none;padding:0;margin:0 0 14px}}
 .sel-item{{padding:4px 0;font-size:.8rem;color:#cbd5e1;display:flex;justify-content:space-between}}
 .sel-sign{{color:#6366f1;font-weight:700;margin-left:8px}}
-.bookmaker-compare{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
-.bm-box{{background:#0f1117;border-radius:8px;padding:12px;border:1px solid #2d3144}}
-.bm-name{{font-weight:700;font-size:.82rem;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}}
-.bm-b9 .bm-name{{color:#22c55e}} .bm-sb .bm-name{{color:#f59e0b}}
-.bm-source{{font-size:.65rem;color:#64748b;font-weight:400;padding:2px 6px;background:#1a1d27;border-radius:4px;border:1px solid #2d3144}}
-.bm-row{{display:flex;justify-content:space-between;font-size:.78rem;padding:2px 0}}
-.bm-label{{color:#64748b}} .bm-val{{font-weight:600;font-variant-numeric:tabular-nums}}
-.bm-total{{border-top:1px solid #2d3144;margin-top:6px;padding-top:6px}}
-.bm-total .bm-val{{font-size:.95rem;color:#e2e8f0}}
+.bookmaker-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:10px;margin-top:12px}}
+.bm-box{{background:#0f1117;border-radius:8px;padding:12px;border:2px solid #2d3144;text-align:center;transition:all .2s}}
+.bm-box.bet9ja{{border-color:#22c55e}} .bm-box.bet9ja.best{{box-shadow:0 0 12px rgba(34,197,94,.3)}}
+.bm-box.sportybet{{border-color:#f59e0b}} .bm-box.sportybet.best{{box-shadow:0 0 12px rgba(245,158,11,.3)}}
+.bm-box.betking{{border-color:#3b82f6}} .bm-box.betking.best{{box-shadow:0 0 12px rgba(59,130,246,.3)}}
+.bm-box.msport{{border-color:#ef4444}} .bm-box.msport.best{{box-shadow:0 0 12px rgba(239,68,68,.3)}}
+.bm-box.betano{{border-color:#8b5cf6}} .bm-box.betano.best{{box-shadow:0 0 12px rgba(139,92,246,.3)}}
+.bm-box.best{{font-weight:700;background:rgba(34,197,94,.08)}}
+.bm-name{{font-weight:700;font-size:.75rem;text-transform:uppercase;margin-bottom:6px;opacity:.9}}
+.bm-odds{{font-size:1.1rem;font-weight:700;font-variant-numeric:tabular-nums}}
 .acca-loading{{text-align:center;padding:60px;color:#64748b;font-size:.9rem}}
 .acca-empty{{text-align:center;padding:60px;color:#64748b}}
-.naira{{font-family:'Inter',system-ui,sans-serif}}
-.best-val{{color:#22c55e !important}}
 
 /* -- Responsive ------------------------------------- */
+@media(max-width:1024px){{
+  .acca-grid{{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}}
+  .bookmaker-grid{{grid-template-columns:repeat(2,1fr)}}
+}}
 @media(max-width:768px){{
   .header{{padding:12px 16px}} .tab-content{{padding:16px}} .search-box{{width:100%}}
-  .acca-grid{{grid-template-columns:1fr}} .bookmaker-compare{{grid-template-columns:1fr}}
-  .filters{{gap:6px}}
+  .acca-grid{{grid-template-columns:1fr}} .bookmaker-grid{{grid-template-columns:repeat(2,1fr)}}
+  .filters{{gap:6px}} .selection-bar{{flex-wrap:wrap;top:auto}}
 }}
 </style>
 </head>
@@ -123,17 +159,25 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
   <button class="tab-btn" data-tab="accumulators">Bet Comparison</button>
 </div>
 
-<!-- ============== TAB 1: ODDS DASHBOARD =============== -->
+<!-- ============= TAB 1: ODDS DASHBOARD =============== -->
 <div class="tab-content active" id="tab-odds">
   <!-- Filters -->
   <div class="filters">
     <input class="search-box" id="search" placeholder="Search event or team&hellip;" oninput="applyFilters()">
     <div class="filter-group" id="league-filters">
       <span class="filter-label">League</span>
+      {league_buttons}
     </div>
     <div class="filter-group" id="market-filters">
       <span class="filter-label">Market</span>
+      {market_buttons}
     </div>
+  </div>
+
+  <!-- Selection Bar -->
+  <div class="selection-bar" id="selection-bar">
+    <span class="selection-count" id="selection-count">0 selections</span>
+    <button class="compare-btn" id="compare-btn" onclick="generateCustomComparison()">Generate Comparison</button>
   </div>
 
   <!-- Table -->
@@ -141,13 +185,17 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
     <table id="odds-table">
       <thead>
         <tr>
+          <th class="checkbox-cell"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>
           <th data-col="league">League <span class="sort-arrow">&#9650;</span></th>
           <th data-col="event">Event <span class="sort-arrow">&#9650;</span></th>
           <th data-col="market">Market <span class="sort-arrow">&#9650;</span></th>
           <th data-col="sign">Sign <span class="sort-arrow">&#9650;</span></th>
           <th data-col="bet9ja">Bet9ja <span class="sort-arrow">&#9650;</span></th>
           <th data-col="sportybet">SportyBet <span class="sort-arrow">&#9650;</span></th>
-          <th data-col="diff">Diff <span class="sort-arrow">&#9650;</span></th>
+          <th data-col="betking">BetKing <span class="sort-arrow">&#9650;</span></th>
+          <th data-col="msport">MSport <span class="sort-arrow">&#9650;</span></th>
+          <th data-col="betano">Betano <span class="sort-arrow">&#9650;</span></th>
+          <th data-col="diff">Best Diff <span class="sort-arrow">&#9650;</span></th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>
@@ -156,15 +204,12 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
   <div class="row-count" id="row-count"></div>
 </div>
 
-<!-- ============== TAB 2: BET COMPARISON =============== -->
+<!-- ============= TAB 2: BET COMPARISON ============== -->
 <div class="tab-content" id="tab-accumulators">
   <div class="acca-loading" id="acca-loading">Loading accumulators&hellip;</div>
-  
-  <div style="text-align:right;margin:10px 0"><button onclick="regenerateAccas()" style="background:#6366f1;color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:.9rem" id="regen-btn">&#x1F504; Regenerate</button></div>
-  
   <div class="acca-grid" id="acca-grid" style="display:none"></div>
   <div class="acca-empty" id="acca-empty" style="display:none">
-    <p>No accumulators available yet. Need at least 3 matched events with 1X2 odds between 1.20-1.80 from both bookmakers.</p>
+    <p>No accumulators available yet. Select rows from the Odds Dashboard and click "Generate Comparison".</p>
   </div>
 </div>
 
@@ -173,7 +218,18 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 const RAW_ROWS = {rows_json};
 let filteredRows = [...RAW_ROWS];
 let sortCol = "diff", sortAsc = false;
-let activeLeague = null, activeMarket = null;
+let selectedIndices = new Set();
+let activeLeagues = new Set();
+let activeMarkets = new Set();
+
+/* -- Bookmaker Config -------------------------------- */
+const BOOKMAKERS = [
+  {{key: 'bet9ja', name: 'Bet9ja', cls: 'bet9ja'}},
+  {{key: 'sportybet', name: 'SportyBet', cls: 'sportybet'}},
+  {{key: 'betking', name: 'BetKing', cls: 'betking'}},
+  {{key: 'msport', name: 'MSport', cls: 'msport'}},
+  {{key: 'betano', name: 'Betano', cls: 'betano'}}
+];
 
 /* -- Tab Switching ----------------------------------- */
 document.querySelectorAll('.tab-btn').forEach(btn => {{
@@ -188,62 +244,63 @@ document.querySelectorAll('.tab-btn').forEach(btn => {{
 
 /* -- League & Market Filters ------------------------- */
 (function buildFilters() {{
-  const leagues = [...new Set(RAW_ROWS.map(r => r.league))].sort();
-  const markets = [...new Set(RAW_ROWS.map(r => r.market))].sort();
-
   const lf = document.getElementById('league-filters');
-  const allL = document.createElement('button');
-  allL.className = 'filter-btn active'; allL.textContent = 'All';
-  allL.onclick = () => {{ activeLeague = null; setActiveFilter(lf, allL); applyFilters(); }};
-  lf.appendChild(allL);
-  leagues.forEach(lg => {{
-    const b = document.createElement('button');
-    b.className = 'filter-btn'; b.textContent = lg;
-    b.onclick = () => {{ activeLeague = lg; setActiveFilter(lf, b); applyFilters(); }};
-    lf.appendChild(b);
+  lf.querySelectorAll('.filter-btn').forEach(btn => {{
+    btn.addEventListener('click', () => {{
+      const league = btn.getAttribute('data-league');
+      btn.classList.toggle('active');
+      if (btn.classList.contains('active')) {{
+        activeLeagues.add(league);
+      }} else {{
+        activeLeagues.delete(league);
+      }}
+      applyFilters();
+    }});
   }});
 
   const mf = document.getElementById('market-filters');
-  const allM = document.createElement('button');
-  allM.className = 'filter-btn active'; allM.textContent = 'All';
-  allM.onclick = () => {{ activeMarket = null; setActiveFilter(mf, allM); applyFilters(); }};
-  mf.appendChild(allM);
-  markets.forEach(mk => {{
-    const b = document.createElement('button');
-    b.className = 'filter-btn'; b.textContent = mk;
-    b.onclick = () => {{ activeMarket = mk; setActiveFilter(mf, b); applyFilters(); }};
-    mf.appendChild(b);
+  mf.querySelectorAll('.filter-btn').forEach(btn => {{
+    btn.addEventListener('click', () => {{
+      const market = btn.getAttribute('data-market');
+      btn.classList.toggle('active');
+      if (btn.classList.contains('active')) {{
+        activeMarkets.add(market);
+      }} else {{
+        activeMarkets.delete(market);
+      }}
+      applyFilters();
+    }});
   }});
 }})();
-
-function setActiveFilter(container, active) {{
-  container.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-  active.classList.add('active');
-}}
 
 /* -- Filtering --------------------------------------- */
 function applyFilters() {{
   const q = document.getElementById('search').value.toLowerCase();
   filteredRows = RAW_ROWS.filter(r => {{
-    if (activeLeague && r.league !== activeLeague) return false;
-    if (activeMarket && r.market !== activeMarket) return false;
-    if (q && !r.event.toLowerCase().includes(q) && !r.league.toLowerCase().includes(q)) return false;
-    return true;
+    const matchLeague = activeLeagues.size === 0 || activeLeagues.has(r.league);
+    const matchMarket = activeMarkets.size === 0 || activeMarkets.has(r.market);
+    const matchSearch = q === '' || r.event.toLowerCase().includes(q) || r.league.toLowerCase().includes(q);
+    return matchLeague && matchMarket && matchSearch;
   }});
+  selectedIndices.clear();
+  document.getElementById('select-all').checked = false;
+  updateSelectionBar();
   doSort();
 }}
 
 /* -- Sorting ----------------------------------------- */
 document.querySelectorAll('#odds-table th').forEach(th => {{
-  th.addEventListener('click', () => {{
-    const col = th.dataset.col;
-    if (sortCol === col) sortAsc = !sortAsc;
-    else {{ sortCol = col; sortAsc = true; }}
-    document.querySelectorAll('#odds-table th').forEach(h => h.classList.remove('sorted'));
-    th.classList.add('sorted');
-    th.querySelector('.sort-arrow').textContent = sortAsc ? '\u25B2' : '\u25BC';
-    doSort();
-  }});
+  if (th.hasAttribute('data-col')) {{
+    th.addEventListener('click', () => {{
+      const col = th.dataset.col;
+      if (sortCol === col) sortAsc = !sortAsc;
+      else {{ sortCol = col; sortAsc = true; }}
+      document.querySelectorAll('#odds-table th').forEach(h => h.classList.remove('sorted'));
+      th.classList.add('sorted');
+      th.querySelector('.sort-arrow').textContent = sortAsc ? '\u25B2' : '\u25BC';
+      doSort();
+    }});
+  }}
 }});
 
 function doSort() {{
@@ -254,9 +311,9 @@ function doSort() {{
       vb = vb ?? (sortAsc ? 9999 : -9999);
       return sortAsc ? va - vb : vb - va;
     }}
-    if (sortCol === 'bet9ja' || sortCol === 'sportybet') {{
-      va = va === '\u2014' ? null : parseFloat(va);
-      vb = vb === '\u2014' ? null : parseFloat(vb);
+    if (['bet9ja', 'sportybet', 'betking', 'msport', 'betano'].includes(sortCol)) {{
+      va = va === 'â' ? null : parseFloat(va);
+      vb = vb === 'â' ? null : parseFloat(vb);
       if (va === null && vb === null) return 0;
       if (va === null) return 1;
       if (vb === null) return -1;
@@ -273,22 +330,35 @@ function doSort() {{
 function renderTable() {{
   const tbody = document.getElementById('tbody');
   let html = '';
-  for (const r of filteredRows) {{
+  for (let idx = 0; idx < filteredRows.length; idx++) {{
+    const r = filteredRows[idx];
+    const odds = BOOKMAKERS.map(bm => {{
+      const val = r[bm.key];
+      return val && val !== 'â' ? parseFloat(val) : null;
+    }}).filter(v => v !== null);
+    const maxOdds = odds.length > 0 ? Math.max(...odds) : 0;
+
     const diff = r.diff;
-    let diffCls = 'diff-zero', diffTxt = '\u2014';
+    let diffCls = 'diff-zero', diffTxt = 'â';
     if (diff !== null && diff !== undefined) {{
       diffTxt = (diff > 0 ? '+' : '') + diff.toFixed(3);
       diffCls = diff > 0 ? 'diff-pos' : diff < 0 ? 'diff-neg' : 'diff-zero';
     }}
-    const b9Cls = r.bet9ja === '\u2014' ? 'missing' : 'odds-cell';
-    const sbCls = r.sportybet === '\u2014' ? 'missing' : 'odds-cell';
+
+    let cellsHtml = BOOKMAKERS.map(bm => {{
+      const val = r[bm.key] || 'â';
+      const numVal = val === 'â' ? 0 : parseFloat(val);
+      const isBest = numVal > 0 && numVal === maxOdds;
+      return `<td class="odds-cell ${{isBest ? 'best' : ''}}">${{val}}</td>`;
+    }}).join('');
+
     html += `<tr>
+      <td class="checkbox-cell"><input type="checkbox" class="row-cb" data-idx="${{idx}}" onchange="updateSelection()"></td>
       <td class="league-cell">${{r.league}}</td>
       <td class="event-cell">${{r.event}}</td>
       <td class="market-cell">${{r.market}}</td>
       <td class="sign-cell">${{r.sign}}</td>
-      <td class="${{b9Cls}}">${{r.bet9ja}}</td>
-      <td class="${{sbCls}}">${{r.sportybet}}</td>
+      ${{cellsHtml}}
       <td class="${{diffCls}}">${{diffTxt}}</td>
     </tr>`;
   }}
@@ -296,26 +366,82 @@ function renderTable() {{
   document.getElementById('row-count').textContent = `Showing ${{filteredRows.length}} of ${{RAW_ROWS.length}} rows`;
 }}
 
+/* -- Checkbox Selection ------------------------------ */
+function toggleSelectAll(checkbox) {{
+  document.querySelectorAll('.row-cb').forEach(cb => {{
+    cb.checked = checkbox.checked;
+  }});
+  updateSelection();
+}}
+
+function updateSelection() {{
+  selectedIndices.clear();
+  document.querySelectorAll('.row-cb:checked').forEach(cb => {{
+    selectedIndices.add(parseInt(cb.getAttribute('data-idx')));
+  }});
+  updateSelectionBar();
+}}
+
+function updateSelectionBar() {{
+  const bar = document.getElementById('selection-bar');
+  const count = selectedIndices.size;
+  document.getElementById('selection-count').textContent = count + ' selection' + (count !== 1 ? 's' : '');
+  if (count > 0) {{
+    bar.classList.add('active');
+  }} else {{
+    bar.classList.remove('active');
+  }}
+}}
+
+/* -- Custom Comparison ------------------------------- */
+async function generateCustomComparison() {{
+  if (selectedIndices.size === 0) {{
+    alert('Please select at least one row');
+    return;
+  }}
+
+  const selectedRows = Array.from(selectedIndices).map(idx => filteredRows[idx]);
+
+  try {{
+    const res = await fetch('/api/custom-comparison', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{rows: selectedRows}})
+    }});
+
+    if (!res.ok) throw new Error('API error');
+    const data = await res.json();
+
+    renderCustomComparison(data);
+    document.querySelectorAll('.tab-btn')[1].click();
+  }} catch (e) {{
+    console.error('Error:', e);
+    alert('Failed to generate comparison');
+  }}
+}}
+
+function renderCustomComparison(data) {{
+  const grid = document.getElementById('acca-grid');
+  grid.innerHTML = '';
+  grid.style.display = 'grid';
+  document.getElementById('acca-loading').style.display = 'none';
+  document.getElementById('acca-empty').style.display = 'none';
+
+  if (!data.comparisons || data.comparisons.length === 0) {{
+    document.getElementById('acca-empty').style.display = 'block';
+    grid.style.display = 'none';
+    return;
+  }}
+
+  data.comparisons.forEach(comp => {{
+    const card = createAccaCard(comp);
+    grid.appendChild(card);
+  }});
+}}
+
 /* -- Accumulators ------------------------------------ */
 let accaLoaded = false;
-async function regenerateAccas() {{
-        const btn = document.getElementById('regen-btn');
-        btn.disabled = true;
-        btn.textContent = 'Regenerating...';
-        fetch('/api/regenerate')
-          .then(r => r.json())
-          .then(data => {{
-            btn.disabled = false;
-            btn.innerHTML = '&#x1F504; Regenerate';
-            loadAccumulators();
-          }})
-          .catch(err => {{
-            btn.disabled = false;
-            btn.innerHTML = '&#x1F504; Regenerate';
-            console.error('Regenerate failed:', err);
-          }});
-      }}
-      async function loadAccumulators() {{
+async function loadAccumulators() {{
   if (accaLoaded) return;
   try {{
     const res = await fetch('/api/accumulators');
@@ -334,54 +460,49 @@ async function regenerateAccas() {{
     grid.innerHTML = '';
 
     data.accumulators.forEach((acca, idx) => {{
-      const b9 = acca.bet9ja;
-      const sb = acca.sportybet;
-      const bestOdds = b9.odds >= sb.odds ? 'b9' : 'sb';
-      const bestTotal = b9.potential_win >= sb.potential_win ? 'b9' : 'sb';
-
-      let selHtml = '';
-      acca.selections.forEach(s => {{
-                const b9O = s.bet9ja ? parseFloat(s.bet9ja).toFixed(2) : '';
-                const sbO = s.sportybet ? parseFloat(s.sportybet).toFixed(2) : '';
-                const oddsStr = b9O ? ' <span style="color:#64748b;font-size:.72rem">(B9:' + b9O + ' / SB:' + sbO + ')</span>' : '';
-                selHtml += '<li class="sel-item"><span>' + s.event + oddsStr + '</span><span class="sel-sign">' + s.sign + '</span></li>';
-            }});
-
-      grid.innerHTML += `
-        <div class="acca-card">
-          <div class="acca-header">
-            <span class="acca-size">Acca <span>#${{idx+1}}</span> &mdash; ${{acca.size}} selections</span>
-          </div>
-          <div class="acca-body">
-            <ul class="sel-list">${{selHtml}}</ul>
-            <div class="bookmaker-compare">
-              <div class="bm-box bm-b9">
-                <div class="bm-name"><span>Bet9ja</span><span class="bm-source">${{b9.source === 'betslip' ? '\u2713 Real' : b9.source === 'calculated' ? '\u2713 Calculated' : '\u2248 Est.'}}</span></div>
-                <div class="bm-row"><span class="bm-label">Combined Odds</span><span class="bm-val ${{bestOdds==='b9'?'best-val':''}}">${{b9.odds.toFixed(2)}}</span></div>
-                <div class="bm-row"><span class="bm-label">Base Win (<span class="naira">&#8358;</span>100)</span><span class="bm-val"><span class="naira">&#8358;</span>${{fmtN(b9.base_win)}}</span></div>
-                <div class="bm-row"><span class="bm-label">Bonus</span><span class="bm-val">${{b9.bonus_percent}}% (<span class="naira">&#8358;</span>${{fmtN(b9.bonus_amount)}})</span></div>
-                <div class="bm-row bm-total"><span class="bm-label">Total Win</span><span class="bm-val ${{bestTotal==='b9'?'best-val':''}}" style="font-size:.95rem"><span class="naira">&#8358;</span>${{fmtN(b9.potential_win)}}</span></div>
-              </div>
-              <div class="bm-box bm-sb">
-                <div class="bm-name"><span>SportyBet</span><span class="bm-source">${{sb.source === 'betslip' ? '\u2713 Real' : '\u2248 Est.'}}</span></div>
-                <div class="bm-row"><span class="bm-label">Combined Odds</span><span class="bm-val ${{bestOdds==='sb'?'best-val':''}}">${{sb.odds.toFixed(2)}}</span></div>
-                <div class="bm-row"><span class="bm-label">Base Win (<span class="naira">&#8358;</span>100)</span><span class="bm-val"><span class="naira">&#8358;</span>${{fmtN(sb.base_win)}}</span></div>
-                <div class="bm-row"><span class="bm-label">Bonus</span><span class="bm-val">${{sb.bonus_percent}}% (<span class="naira">&#8358;</span>${{fmtN(sb.bonus_amount)}})</span></div>
-                <div class="bm-row bm-total"><span class="bm-label">Total Win</span><span class="bm-val ${{bestTotal==='sb'?'best-val':''}}" style="font-size:.95rem"><span class="naira">&#8358;</span>${{fmtN(sb.potential_win)}}</span></div>
-              </div>
-            </div>
-          </div>
-        </div>`;
+      const comp = {{
+        title: `Acca #${{idx+1}} - ${{acca.size}} selections`,
+        bet9ja: acca.bet9ja ? acca.bet9ja.potential_win : 0,
+        sportybet: acca.sportybet ? acca.sportybet.potential_win : 0,
+        betking: acca.betking ? acca.betking.potential_win : 0,
+        msport: acca.msport ? acca.msport.potential_win : 0,
+        betano: acca.betano ? acca.betano.potential_win : 0
+      }};
+      const card = createAccaCard(comp);
+      grid.appendChild(card);
     }});
     accaLoaded = true;
   }} catch (e) {{
     const el = document.getElementById('acca-loading');
     el.textContent = 'Failed to load accumulators. Try refreshing.';
-    el.style.display = 'block';
   }}
 }}
 
-function fmtN(n) {{ return n.toLocaleString('en-NG', {{minimumFractionDigits:2, maximumFractionDigits:2}}); }}
+function createAccaCard(comp) {{
+  const card = document.createElement('div');
+  card.className = 'acca-card';
+
+  const odds = BOOKMAKERS.map(bm => comp[bm.key] || 0);
+  const maxOdds = Math.max(...odds);
+
+  let html = `<div class="acca-header"><span class="acca-size">${{comp.title || 'Accumulator'}}</span></div>`;
+  html += '<div class="bookmaker-grid">';
+
+  BOOKMAKERS.forEach((bm, idx) => {{
+    const val = comp[bm.key] || 0;
+    const isBest = val === maxOdds && maxOdds > 0;
+    html += `
+      <div class="bm-box ${{bm.cls}} ${{isBest ? 'best' : ''}}">
+        <div class="bm-name">${{bm.name}}</div>
+        <div class="bm-odds">${{val ? val.toFixed(2) : 'â'}}</div>
+      </div>
+    `;
+  }});
+
+  html += '</div>';
+  card.innerHTML = html;
+  return card;
+}}
 
 /* -- Refresh ----------------------------------------- */
 function triggerRefresh() {{
