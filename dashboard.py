@@ -317,7 +317,7 @@ async function loadAccumulators() {{
       const b9 = acca.bet9ja;
       const sb = acca.sportybet;
       const bestOdds = b9.odds >= sb.odds ? 'b9' : 'sb';
-      const bestTotal = b9.total_win >= sb.total_win ? 'b9' : 'sb';
+      const bestTotal = b9.potential_win >= sb.potential_win ? 'b9' : 'sb';
 
       let selHtml = '';
       acca.selections.forEach(s => {{
@@ -337,14 +337,14 @@ async function loadAccumulators() {{
                 <div class="bm-row"><span class="bm-label">Combined Odds</span><span class="bm-val ${{bestOdds==='b9'?'best-val':''}}">${{b9.odds.toFixed(2)}}</span></div>
                 <div class="bm-row"><span class="bm-label">Base Win (<span class="naira">&#8358;</span>100)</span><span class="bm-val"><span class="naira">&#8358;</span>${{fmtN(b9.base_win)}}</span></div>
                 <div class="bm-row"><span class="bm-label">Bonus</span><span class="bm-val">${{b9.bonus_percent}}% (<span class="naira">&#8358;</span>${{fmtN(b9.bonus_amount)}})</span></div>
-                <div class="bm-row bm-total"><span class="bm-label">Total Win</span><span class="bm-val ${{bestTotal==='b9'?'best-val':''}}" style="font-size:.95rem"><span class="naira">&#8358;</span>${{fmtN(b9.total_win)}}</span></div>
+                <div class="bm-row bm-total"><span class="bm-label">Total Win</span><span class="bm-val ${{bestTotal==='b9'?'best-val':''}}" style="font-size:.95rem"><span class="naira">&#8358;</span>${{fmtN(b9.potential_win)}}</span></div>
               </div>
               <div class="bm-box bm-sb">
                 <div class="bm-name"><span>SportyBet</span><span class="bm-source">${{sb.source === 'betslip' ? '\u2713 Real' : '\u2248 Est.'}}</span></div>
                 <div class="bm-row"><span class="bm-label">Combined Odds</span><span class="bm-val ${{bestOdds==='sb'?'best-val':''}}">${{sb.odds.toFixed(2)}}</span></div>
                 <div class="bm-row"><span class="bm-label">Base Win (<span class="naira">&#8358;</span>100)</span><span class="bm-val"><span class="naira">&#8358;</span>${{fmtN(sb.base_win)}}</span></div>
                 <div class="bm-row"><span class="bm-label">Bonus</span><span class="bm-val">${{sb.bonus_percent}}% (<span class="naira">&#8358;</span>${{fmtN(sb.bonus_amount)}})</span></div>
-                <div class="bm-row bm-total"><span class="bm-label">Total Win</span><span class="bm-val ${{bestTotal==='sb'?'best-val':''}}" style="font-size:.95rem"><span class="naira">&#8358;</span>${{fmtN(sb.total_win)}}</span></div>
+                <div class="bm-row bm-total"><span class="bm-label">Total Win</span><span class="bm-val ${{bestTotal==='sb'?'best-val':''}}" style="font-size:.95rem"><span class="naira">&#8358;</span>${{fmtN(sb.potential_win)}}</span></div>
               </div>
             </div>
           </div>
@@ -352,7 +352,9 @@ async function loadAccumulators() {{
     }});
     accaLoaded = true;
   }} catch (e) {{
-    document.getElementById('acca-loading').textContent = 'Failed to load accumulators. Try refreshing.';
+    const el = document.getElementById('acca-loading');
+    el.textContent = 'Failed to load accumulators. Try refreshing.';
+    el.style.display = 'block';
   }}
 }}
 
