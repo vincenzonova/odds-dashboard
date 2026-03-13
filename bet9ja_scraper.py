@@ -59,12 +59,17 @@ def _parse_event(event: dict, league_name: str) -> dict | None:
     if not odds:
         return None
 
-    return {
+    result = {
         "event_id": str(event.get("ID", name)),
         "event": name,
         "league": league_name,
         "odds": odds,
     }
+    # Extract start time - Bet9ja API uses DA for date string
+    start_time = event.get("DA", event.get("DT", ""))
+    if start_time:
+        result["start_time"] = str(start_time)
+    return result
 
 
 async def scrape_bet9ja(max_matches: int = 50) -> list[dict]:
