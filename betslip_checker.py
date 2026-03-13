@@ -257,7 +257,8 @@ def calculate_bet9ja_returns(selections: list[dict], stake: float = 100) -> dict
         if isinstance(odds, str):
             odds = float(odds)
         combined_odds *= odds
-        if odds >= 1.20:
+        # Best Price events are excluded from Multiple Boost bonus
+        if odds >= 1.20 and not sel.get("best_price", False):
             qualifying_count += 1
 
     base_win = stake * combined_odds
