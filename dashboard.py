@@ -321,8 +321,11 @@ async function loadAccumulators() {{
 
       let selHtml = '';
       acca.selections.forEach(s => {{
-        selHtml += `<li class="sel-item"><span>${{s.event}}</span><span class="sel-sign">${{s.sign}}</span></li>`;
-      }});
+                const b9O = s.bet9ja ? parseFloat(s.bet9ja).toFixed(2) : '';
+                const sbO = s.sportybet ? parseFloat(s.sportybet).toFixed(2) : '';
+                const oddsStr = b9O ? ' <span style="color:#64748b;font-size:.72rem">(B9:' + b9O + ' / SB:' + sbO + ')</span>' : '';
+                selHtml += '<li class="sel-item"><span>' + s.event + oddsStr + '</span><span class="sel-sign">' + s.sign + '</span></li>';
+            }});
 
       grid.innerHTML += `
         <div class="acca-card">
