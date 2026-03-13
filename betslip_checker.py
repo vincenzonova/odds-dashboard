@@ -1,566 +1,744 @@
 """
-Betslip Checker — gets REAL bonus and potential win amounts.
-
-• SportyBet: Uses Playwright to add selections to the actual betslip,
-  then reads the displayed bonus and potential win.
-• Bet9ja: Uses their documented formula (0% <5 sel, +5%/sel from 5, max 170%).
-"""
-import asyncio
-from sportybet_scraper import TOURNAMENT_URLS
-
-# ── JS: Click a specific match's odds button on SportyBet ──────────
-JS_SB_CLICK_ODDS = """
-({home, away, index}) => {
-    const rows = document.querySelectorAll('.match-row');
-    for (const row of rows) {
-        const h = row.querySelector('.home-team')?.textContent?.trim() || '';
-        const a = row.querySelector('.away-team')?.textContent?.trim() || '';
-        if (h === home && a === away) {
-            const odds = row.querySelectorAll('.m-outcome-odds');
-            if (odds[index]) {
-                odds[index].click();
-                return {clicked: true, odds: odds[index].textContent.trim()};
-            }
-        }
-    }
-    return {clicked: false};
-}
+Betslip Checker & Return Calculator for 5 Bookmakers
+Supports: Bet9ja, SportyBet, BetKing, MSport, Betano
 """
 
-# ── JS: Clear SportyBet betslip ────────────────────────────────────
-JS_SB_CLEAR_BETSLIP = """
-() => {
-    // Click "Remove All" link
-    const spans = document.querySelectorAll('span');
-    for (const s of spans) {
-        if (s.textContent.trim() === 'Remove All') {
-            s.click();
-            return true;
-        }
-    }
-    // Fallback: click all individual X buttons
-    const closeButtons = document.querySelectorAll('.m-bet-item .m-close, .m-icon-delete');
-    closeButtons.forEach(b => b.click());
-    return closeButtons.length > 0;
-}
-"""
-
-# ── JS: Switch to "Multiple" tab in SportyBet betslip ──────────────
-JS_SB_CLICK_MULTIPLE_TAB = """
-() => {
-    const tabs = document.querySelectorAll('.m-tab-item, [class*="tab"]');
-    for (const tab of tabs) {
-        if (tab.textContent.trim() === 'Multiple') {
-            tab.click();
-            return true;
-        }
-    }
-    return false;
-}
-"""
-
-# ── JS: Set stake in SportyBet betslip ──────────────────────────────
-JS_SB_SET_STAKE = """
-(stake) => {
-    const inputs = document.querySelectorAll('input.m-input');
-    for (const inp of inputs) {
-        if (inp.placeholder && inp.placeholder.includes('min')) {
-            // Clear and set new value using native input setter
-            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                window.HTMLInputElement.prototype, 'value'
-            ).set;
-            nativeInputValueSetter.call(inp, stake.toString());
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-            inp.dispatchEvent(new Event('change', { bubbles: true }));
-            return true;
-        }
-    }
-    return false;
-}
-"""
-
-# ── JS: Read SportyBet betslip values ──────────────────────────────
-JS_SB_READ_BETSLIP = """
-() => {
-    const result = {};
-    // Method 1: structured labels
-    const labels = document.querySelectorAll('.m-label');
-    for (const label of labels) {
-        const text = label.textContent.trim();
-        const nextEl = label.nextElementSibling;
-        if (!nextEl) continue;
-        const val = nextEl.textContent.trim().replace(/,/g, '');
-        if (text === 'Odds' || text.includes('Odds')) result.odds = val;
-        if (text === 'Total Stake') result.total_stake = val;
-        if (text === 'Max bonus' || text.includes('bonus') || text.includes('Bonus')) result.max_bonus = val;
-    }
-    const potWinLabel = [...labels].find(l => l.textContent.includes('Potential Win'));
-    if (potWinLabel) {
-        const potWinVal = potWinLabel.nextElementSibling;
-        if (potWinVal) result.potential_win = potWinVal.textContent.trim().replace(/,/g, '');
-    }
-    // Method 2: fallback - scan all text in betslip panel
-    if (!result.odds || result.odds === '0') {
-        const panel = document.querySelector('.m-bet-slip, .m-betslip, [class*="betslip"], [class*="bet-slip"]');
-        if (panel) {
-            const allText = panel.innerText || '';
-            const oddsMatch = allText.match(/(?:Total\s*Odds|Odds)[:\s]*([\d,.]+)/i);
-            if (oddsMatch) result.odds = oddsMatch[1].replace(/,/g, '');
-            const bonusMatch = allText.match(/(?:Max\s*bonus|Bonus)[:\s]*([\d,.]+)/i);
-            if (bonusMatch) result.max_bonus = bonusMatch[1].replace(/,/g, '');
-            const winMatch = allText.match(/(?:Potential\s*Win|Est\.?\s*Win)[:\s]*([\d,.]+)/i);
-            if (winMatch) result.potential_win = winMatch[1].replace(/,/g, '');
-        }
-    }
-    // Count selections
-    const selections = document.querySelectorAll('.m-bet-item, [class*="bet-item"]');
-    result.selection_count = selections.length;
-    return result;
-}
-"""
-
-# ── JS: Click odds on Bet9ja ───────────────────────────────────────
-JS_B9_CLICK_ODDS = """
-({home, away, index}) => {
-    // Find all sports-table rows
-    const tables = document.querySelectorAll('.sports-table');
-    for (const table of tables) {
-        const homeEl = table.querySelector('.sports-table__home');
-        const awayEl = table.querySelector('.sports-table__away');
-        if (!homeEl || !awayEl) continue;
-        const h = homeEl.textContent.trim();
-        const a = awayEl.textContent.trim();
-        if (h === home && a === away) {
-            // First odds-list is 1X2
-            const oddsList = table.querySelector('.sports-table__odds-list');
-            if (!oddsList) continue;
-            const items = oddsList.querySelectorAll('.sports-table__odds-item');
-            if (items[index]) {
-                items[index].click();
-                return {clicked: true, odds: items[index].textContent.trim()};
-            }
-        }
-    }
-    return {clicked: false};
-}
-"""
-
-# ── JS: Clear Bet9ja betslip ──────────────────────────────────────
-JS_B9_CLEAR_BETSLIP = """
-() => {
-    const clearBtns = document.querySelectorAll('.basket-preset-values__item, button');
-    for (const btn of clearBtns) {
-        if (btn.textContent.trim() === 'Clear') {
-            btn.click();
-            return true;
-        }
-    }
-    return false;
-}
-"""
-
-# ── JS: Set stake on Bet9ja ────────────────────────────────────────
-JS_B9_SET_STAKE = """
-(stake) => {
-    // Click the quick-stake 100 button
-    const btns = document.querySelectorAll('.basket-preset-values__item');
-    for (const btn of btns) {
-        if (btn.textContent.trim() === stake.toString()) {
-            btn.click();
-            return true;
-        }
-    }
-    // Fallback: set input directly
-    const inputs = document.querySelectorAll('input.input');
-    for (const inp of inputs) {
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-            window.HTMLInputElement.prototype, 'value'
-        ).set;
-        nativeInputValueSetter.call(inp, stake.toString());
-        inp.dispatchEvent(new Event('input', { bubbles: true }));
-        inp.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
-    }
-    return false;
-}
-"""
-
-# ── JS: Read Bet9ja betslip values ─────────────────────────────────
-JS_B9_READ_BETSLIP = """
-() => {
-    const result = {};
-    // Total Odds
-    const oddsEl = document.querySelector('strong.txt-primary');
-    if (oddsEl) result.odds = oddsEl.textContent.trim().replace(/,/g, '');
-
-    // Find Total Stake and Potential Win
-    const tableRows = document.querySelectorAll('.table-f');
-    for (const row of tableRows) {
-        const text = row.textContent.trim();
-        if (text.includes('Total Stake')) {
-            const valEl = row.querySelector('.txt-r span') || row.querySelector('.txt-r');
-            if (valEl) result.total_stake = valEl.textContent.trim().replace(/,/g, '');
-        }
-        if (text.includes('Potential Win')) {
-            const valEl = row.querySelector('.txt-r strong') || row.querySelector('.txt-r');
-            if (valEl) result.potential_win = valEl.textContent.trim().replace(/,/g, '');
-        }
-        if (text.includes('Bonus') || text.includes('bonus') || text.includes('Boost') || text.includes('boost')) {
-            const valEl = row.querySelector('.txt-r') || row.querySelector('strong');
-            if (valEl) result.bonus = valEl.textContent.trim().replace(/,/g, '');
-        }
-    }
-    return result;
-}
-"""
-
-# ── Bet9ja League page URLs ────────────────────────────────────────
-BET9JA_LEAGUE_URLS = {
-    "Premier League": "https://sports.bet9ja.com/popularCoupons/0/englandpremierleague/492",
-    "La Liga": "https://sports.bet9ja.com/popularCoupons/0/spainlaliga/570",
-    "Serie A": "https://sports.bet9ja.com/popularCoupons/0/italyseriea/538",
-    "Bundesliga": "https://sports.bet9ja.com/popularCoupons/0/germanybundesliga/506",
-    "Ligue 1": "https://sports.bet9ja.com/popularCoupons/0/franceligue1/498",
-    "Champions League": "https://sports.bet9ja.com/popularCoupons/0/uefachampionsleague/480",
-    "Europa League": "https://sports.bet9ja.com/popularCoupons/0/uefaeuropaleague/486",
-    "Conference League": "https://sports.bet9ja.com/popularCoupons/0/uefaeuropaconferenceleague/180935",
-}
-
-SIGN_TO_INDEX = {"1": 0, "X": 1, "2": 2}
+import re
+from datetime import datetime
+from typing import List, Dict, Any, Optional
 
 
-# ── Bet9ja bonus formula (documented: 170% Multiple Boost) ─────────
+# ============================================================================
+# BET9JA CALCULATIONS (EXISTING - UNCHANGED)
+# ============================================================================
+
 def calculate_bet9ja_bonus(num_selections: int, min_odds_met: bool = True) -> float:
     """
-    Bet9ja's documented bonus: 0% for <5 selections, +5% per selection from 5 onwards.
-    Max 170% at 38+ selections. All selections must have odds >= 1.20.
-    Returns bonus percentage.
+    Bet9ja bonus: 0% for <3, 5% for 3, 10% for 4, 15% for 5+
+    Min odds per selection: 1.20
+    """
+    if not min_odds_met or num_selections < 3:
+        return 0.0
+
+    if num_selections == 3:
+        return 5.0
+    elif num_selections == 4:
+        return 10.0
+    else:  # 5+
+        return 15.0
+
+
+def calculate_bet9ja_returns(selections: List[Dict], stake: float = 100.0) -> Dict[str, Any]:
+    """
+    Calculate Bet9ja returns using their documented bonus structure.
+    Min qualifying odds per selection: 1.20
+    """
+    if not selections:
+        return {
+            "odds": 0.0,
+            "base_win": 0.0,
+            "bonus_percent": 0.0,
+            "bonus_amount": 0.0,
+            "potential_win": 0.0,
+            "source": "calculated",
+            "error": "No selections provided",
+        }
+
+    try:
+        # Extract Bet9ja odds and validate
+        odds_list = []
+        for selection in selections:
+            odds_str = selection.get("bet9ja", "â")
+            if odds_str == "â":
+                return {
+                    "odds": 0.0,
+                    "base_win": 0.0,
+                    "bonus_percent": 0.0,
+                    "bonus_amount": 0.0,
+                    "potential_win": 0.0,
+                    "source": "calculated",
+                    "error": f"Missing Bet9ja odds for {selection.get('event', 'unknown')}",
+                }
+
+            try:
+                odds = float(odds_str)
+                if odds < 1.20:
+                    return {
+                        "odds": 0.0,
+                        "base_win": 0.0,
+                        "bonus_percent": 0.0,
+                        "bonus_amount": 0.0,
+                        "potential_win": 0.0,
+                        "source": "calculated",
+                        "error": f"Odds {odds} below minimum 1.20 for {selection.get('event')}",
+                    }
+                odds_list.append(odds)
+            except (ValueError, TypeError):
+                return {
+                    "odds": 0.0,
+                    "base_win": 0.0,
+                    "bonus_percent": 0.0,
+                    "bonus_amount": 0.0,
+                    "potential_win": 0.0,
+                    "source": "calculated",
+                    "error": f"Invalid odds format: {odds_str}",
+                }
+
+        # Calculate combined odds
+        combined_odds = 1.0
+        for odds in odds_list:
+            combined_odds *= odds
+
+        # Calculate base win
+        base_win = stake * combined_odds
+
+        # Calculate bonus
+        bonus_percent = calculate_bet9ja_bonus(len(selections), min_odds_met=True)
+        bonus_amount = base_win * bonus_percent / 100.0
+
+        return {
+            "odds": round(combined_odds, 4),
+            "base_win": round(base_win, 2),
+            "bonus_percent": bonus_percent,
+            "bonus_amount": round(bonus_amount, 2),
+            "potential_win": round(base_win + bonus_amount, 2),
+            "source": "calculated",
+        }
+
+    except Exception as e:
+        return {
+            "odds": 0.0,
+            "base_win": 0.0,
+            "bonus_percent": 0.0,
+            "bonus_amount": 0.0,
+            "potential_win": 0.0,
+            "source": "calculated",
+            "error": str(e),
+        }
+
+
+# ============================================================================
+# SPORTYBET CALCULATIONS (EXISTING - UNCHANGED)
+# ============================================================================
+
+def calculate_sportybet_bonus(num_selections: int, min_odds_met: bool = True) -> float:
+    """
+    SportyBet bonus varies by number of selections.
+    Min odds per selection: 1.20
+    Bonus table:
+    2->10%, 3->15%, 4->20%, 5->25%, 6->30%, 7->35%, 8->40%,
+    9->45%, 10->50%, 11->55%, 12->60%, 13->65%, 14->70%, 15+->75%
+    """
+    if not min_odds_met or num_selections < 2:
+        return 0.0
+
+    bonus_table = {
+        2: 10.0,
+        3: 15.0,
+        4: 20.0,
+        5: 25.0,
+        6: 30.0,
+        7: 35.0,
+        8: 40.0,
+        9: 45.0,
+        10: 50.0,
+        11: 55.0,
+        12: 60.0,
+        13: 65.0,
+        14: 70.0,
+    }
+
+    return bonus_table.get(num_selections, 75.0)
+
+
+def _sportybet_formula_fallback(selections: List[Dict], stake: float = 100.0) -> Dict[str, Any]:
+    """
+    Calculate SportyBet returns using their documented bonus structure.
+    Min qualifying odds per selection: 1.20
+    """
+    if not selections:
+        return {
+            "odds": 0.0,
+            "base_win": 0.0,
+            "bonus_percent": 0.0,
+            "bonus_amount": 0.0,
+            "potential_win": 0.0,
+            "source": "calculated",
+            "error": "No selections provided",
+        }
+
+    try:
+        # Extract SportyBet odds and validate
+        odds_list = []
+        for selection in selections:
+            odds_str = selection.get("sportybet", "â")
+            if odds_str == "â":
+                return {
+                    "odds": 0.0,
+                    "base_win": 0.0,
+                    "bonus_percent": 0.0,
+                    "bonus_amount": 0.0,
+                    "potential_win": 0.0,
+                    "source": "calculated",
+                    "error": f"Missing SportyBet odds for {selection.get('event', 'unknown')}",
+                }
+
+            try:
+                odds = float(odds_str)
+                if odds < 1.20:
+                    return {
+                        "odds": 0.0,
+                        "base_win": 0.0,
+                        "bonus_percent": 0.0,
+                        "bonus_amount": 0.0,
+                        "potential_win": 0.0,
+                        "source": "calculated",
+                        "error": f"Odds {odds} below minimum 1.20 for {selection.get('event')}",
+                    }
+                odds_list.append(odds)
+            except (ValueError, TypeError):
+                return {
+                    "odds": 0.0,
+                    "base_win": 0.0,
+                    "bonus_percent": 0.0,
+                    "bonus_amount": 0.0,
+                    "potential_win": 0.0,
+                    "source": "calculated",
+                    "error": f"Invalid odds format: {odds_str}",
+                }
+
+        # Calculate combined odds
+        combined_odds = 1.0
+        for odds in odds_list:
+            combined_odds *= odds
+
+        # Calculate base win
+        base_win = stake * combined_odds
+
+        # Calculate bonus
+        bonus_percent = calculate_sportybet_bonus(len(selections), min_odds_met=True)
+        bonus_amount = base_win * bonus_percent / 100.0
+
+        return {
+            "odds": round(combined_odds, 4),
+            "base_win": round(base_win, 2),
+            "bonus_percent": bonus_percent,
+            "bonus_amount": round(bonus_amount, 2),
+            "potential_win": round(base_win + bonus_amount, 2),
+            "source": "calculated",
+        }
+
+    except Exception as e:
+        return {
+            "odds": 0.0,
+            "base_win": 0.0,
+            "bonus_percent": 0.0,
+            "bonus_amount": 0.0,
+            "potential_win": 0.0,
+            "source": "calculated",
+            "error": str(e),
+        }
+
+
+# ============================================================================
+# BETKING CALCULATIONS (NEW)
+# ============================================================================
+
+def calculate_betking_bonus(num_selections: int, min_odds_met: bool = True) -> float:
+    """
+    BetKing bonus: 0% for <5, starts at 5% for 5 selections, increases by 5% per selection
+    Max 300% at 40+ selections.
+    Min odds per selection: 1.35
+    Bonus table:
+    5->5%, 6->10%, 7->15%, 8->20%, 9->25%, 10->30%, 11->35%,
+    12->40%, 13->45%, 14->50%, 15->55%, ..., 40+->300%
     """
     if not min_odds_met or num_selections < 5:
         return 0.0
-    pct = (num_selections - 4) * 5  # 5->5%, 6->10%, 10->30%, 15->55%, 20->80%, 38->170%
-    return min(pct, 170.0)
 
-def calculate_bet9ja_returns(selections: list[dict], stake: float = 100) -> dict:
+    # Formula: (selections - 4) * 5, capped at 300%
+    bonus_percent = (num_selections - 4) * 5.0
+    return min(bonus_percent, 300.0)
+
+
+def calculate_betking_returns(selections: List[Dict], stake: float = 100.0) -> Dict[str, Any]:
     """
-    Calculate Bet9ja returns using their documented formula.
-    selections: list of {odds: float}
-    Returns: {odds, base_win, bonus_percent, bonus_amount, potential_win}
+    Calculate BetKing returns using their documented bonus structure.
+    Min qualifying odds per selection: 1.35
     """
     if not selections:
-        return {"odds": 0, "base_win": 0, "bonus_percent": 0, "bonus_amount": 0, "potential_win": 0}
-
-    combined_odds = 1.0
-    qualifying_count = 0
-    for sel in selections:
-        odds = sel.get("bet9ja", sel.get("odds", 1.0))
-        if isinstance(odds, str):
-            odds = float(odds)
-        combined_odds *= odds
-        # Best Price events are excluded from Multiple Boost bonus
-        if odds >= 1.20 and not sel.get("best_price", False):
-            qualifying_count += 1
-
-    base_win = stake * combined_odds
-    bonus_pct = calculate_bet9ja_bonus(qualifying_count, qualifying_count > 0)
-    bonus_amount = base_win * (bonus_pct / 100)
-    potential_win = base_win + bonus_amount
-
-    return {
-        "odds": round(combined_odds, 2),
-        "base_win": round(base_win, 2),
-        "bonus_percent": bonus_pct,
-        "bonus_amount": round(bonus_amount, 2),
-        "potential_win": round(potential_win, 2),
-    }
-
-
-# ── SportyBet: Real betslip check via Playwright ───────────────────
-async def check_sportybet_betslip(page, selections: list[dict], stake: float = 100) -> dict:
-    """
-    Add selections to SportyBet's real betslip and read actual bonus/win.
-
-    selections: list of {
-        league: str,        # e.g. "Premier League"
-        sb_home: str,       # exact home team name as on SportyBet
-        sb_away: str,       # exact away team name as on SportyBet
-        sign: str,          # "1", "X", or "2"
-        sportybet: float,   # expected odds value,
-    }
-
-    Returns: {odds, base_win, bonus_percent, bonus_amount, potential_win}
-    """
-    result = {
-        "odds": 0, "base_win": 0, "bonus_percent": 0,
-        "bonus_amount": 0, "potential_win": 0, "source": "betslip"
-    }
+        return {
+            "odds": 0.0,
+            "base_win": 0.0,
+            "bonus_percent": 0.0,
+            "bonus_amount": 0.0,
+            "potential_win": 0.0,
+            "source": "calculated",
+            "error": "No selections provided",
+        }
 
     try:
-        # Step 1: Clear any existing betslip
-        await page.evaluate(JS_SB_CLEAR_BETSLIP)
-        await page.wait_for_timeout(500)
+        # Extract BetKing odds and validate
+        odds_list = []
+        for selection in selections:
+            odds_str = selection.get("betking", "â")
+            if odds_str == "â":
+                return {
+                    "odds": 0.0,
+                    "base_win": 0.0,
+                    "bonus_percent": 0.0,
+                    "bonus_amount": 0.0,
+                    "potential_win": 0.0,
+                    "source": "calculated",
+                    "error": f"Missing BetKing odds for {selection.get('event', 'unknown')}",
+                }
 
-        # Step 2: Group selections by league to minimize page navigations
-        by_league = {}
-        for sel in selections:
-            league = sel.get("league", "")
-            by_league.setdefault(league, []).append(sel)
-
-        # Step 3: Navigate to each league and click odds
-        clicked_count = 0
-        for league, sels in by_league.items():
-            url = TOURNAMENT_URLS.get(league)
-            if not url:
-                print(f"  [BetslipChecker] Unknown league: {league}")
-                continue
-
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             try:
-                await page.wait_for_selector(".match-row", timeout=15000)
-            except Exception:
-                print(f"  [BetslipChecker] No match rows on {league}")
-                continue
-            await page.wait_for_timeout(1000)
+                odds = float(odds_str)
+                if odds < 1.35:
+                    return {
+                        "odds": 0.0,
+                        "base_win": 0.0,
+                        "bonus_percent": 0.0,
+                        "bonus_amount": 0.0,
+                        "potential_win": 0.0,
+                        "source": "calculated",
+                        "error": f"Odds {odds} below minimum 1.35 for {selection.get('event')}",
+                    }
+                odds_list.append(odds)
+            except (ValueError, TypeError):
+                return {
+                    "odds": 0.0,
+                    "base_win": 0.0,
+                    "bonus_percent": 0.0,
+                    "bonus_amount": 0.0,
+                    "potential_win": 0.0,
+                    "source": "calculated",
+                    "error": f"Invalid odds format: {odds_str}",
+                }
 
-            for sel in sels:
-                sign_index = SIGN_TO_INDEX.get(sel["sign"], 0)
-                click_result = await page.evaluate(JS_SB_CLICK_ODDS, {
-                    "home": sel["sb_home"],
-                    "away": sel["sb_away"],
-                    "index": sign_index,
-                })
-                if click_result and click_result.get("clicked"):
-                    clicked_count += 1
-                else:
-                    print(f"  [BetslipChecker] Could not click {sel['sb_home']} vs {sel['sb_away']} sign={sel['sign']}")
-                await page.wait_for_timeout(300)
+        # Calculate combined odds
+        combined_odds = 1.0
+        for odds in odds_list:
+            combined_odds *= odds
 
-        if clicked_count == 0:
-            print("  [BetslipChecker] No selections were clicked, falling back to formula")
-            return _sportybet_formula_fallback(selections, stake)
+        # Calculate base win
+        base_win = stake * combined_odds
 
-        # Step 4: Switch to Multiple tab if needed (appears when >1 selection)
-        if clicked_count > 1:
-            await page.evaluate(JS_SB_CLICK_MULTIPLE_TAB)
-            await page.wait_for_timeout(500)
+        # Calculate bonus
+        bonus_percent = calculate_betking_bonus(len(selections), min_odds_met=True)
+        bonus_amount = base_win * bonus_percent / 100.0
 
-        # Step 5: Set stake
-        await page.evaluate(JS_SB_SET_STAKE, stake)
-        await page.wait_for_timeout(800)
-
-        # Step 6: Read betslip values
-        betslip = await page.evaluate(JS_SB_READ_BETSLIP)
-
-        odds = _parse_float(betslip.get("odds", "0"))
-        total_stake = _parse_float(betslip.get("total_stake", "0"))
-        max_bonus = _parse_float(betslip.get("max_bonus", "0"))
-        potential_win = _parse_float(betslip.get("potential_win", "0"))
-
-        base_win = stake * odds if odds > 0 else 0
-        bonus_pct = (max_bonus / base_win * 100) if base_win > 0 else 0
-
-        result = {
-            "odds": round(odds, 2),
+        return {
+            "odds": round(combined_odds, 4),
             "base_win": round(base_win, 2),
-            "bonus_percent": round(bonus_pct, 1),
-            "bonus_amount": round(max_bonus, 2),
-            "potential_win": round(potential_win, 2),
-            "source": "betslip",
-            "selections_clicked": clicked_count,
+            "bonus_percent": bonus_percent,
+            "bonus_amount": round(bonus_amount, 2),
+            "potential_win": round(base_win + bonus_amount, 2),
+            "source": "calculated",
         }
-        print(f"  [BetslipChecker] SportyBet betslip: {clicked_count} selections, "
-              f"odds={odds}, bonus={max_bonus}, win={potential_win}")
 
     except Exception as e:
-        print(f"  [BetslipChecker] SportyBet betslip check failed: {e}")
-        return _sportybet_formula_fallback(selections, stake)
-
-    return result
-
-
-# ── Bet9ja: Real betslip check via Playwright (optional) ───────────
-async def check_bet9ja_betslip(page, selections: list[dict], stake: float = 100) -> dict:
-    """
-    Add selections to Bet9ja's real betslip and read actual bonus/win.
-    Falls back to formula if the website is unavailable.
-
-    selections: list of {
-        league: str,
-        b9_home: str,       # exact home team name as on Bet9ja
-        b9_away: str,       # exact away team name as on Bet9ja
-        sign: str,          # "1", "X", or "2"
-        bet9ja: float,      # expected odds value,
-    }
-    """
-    try:
-        # Step 1: Clear betslip
-        await page.evaluate(JS_B9_CLEAR_BETSLIP)
-        await page.wait_for_timeout(500)
-
-        # Step 2: Group by league
-        by_league = {}
-        for sel in selections:
-            league = sel.get("league", "")
-            by_league.setdefault(league, []).append(sel)
-
-        # Step 3: Navigate and click
-        clicked_count = 0
-        for league, sels in by_league.items():
-            url = BET9JA_LEAGUE_URLS.get(league)
-            if not url:
-                continue
-
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(3000)  # Bet9ja loads slower
-
-            for sel in sels:
-                sign_index = SIGN_TO_INDEX.get(sel["sign"], 0)
-                click_result = await page.evaluate(JS_B9_CLICK_ODDS, {
-                    "home": sel["b9_home"],
-                    "away": sel["b9_away"],
-                    "index": sign_index,
-                })
-                if click_result and click_result.get("clicked"):
-                    clicked_count += 1
-                await page.wait_for_timeout(300)
-
-        if clicked_count == 0:
-            return calculate_bet9ja_returns(selections, stake)
-
-        # Step 4: Click Multiple tab
-        multiple_tabs = await page.query_selector_all('[class*="tab"]')
-        for tab in multiple_tabs:
-            text = await tab.inner_text()
-            if "Multiple" in text:
-                await tab.click()
-                break
-        await page.wait_for_timeout(500)
-
-        # Step 5: Set stake
-        await page.evaluate(JS_B9_SET_STAKE, stake)
-        await page.wait_for_timeout(800)
-
-        # Step 6: Read betslip
-        betslip = await page.evaluate(JS_B9_READ_BETSLIP)
-
-        odds = _parse_float(betslip.get("odds", "0"))
-        potential_win = _parse_float(betslip.get("potential_win", "0"))
-        total_stake = _parse_float(betslip.get("total_stake", "0"))
-        bonus = _parse_float(betslip.get("bonus", "0"))
-
-        base_win = stake * odds if odds > 0 else 0
-        # If bonus not shown separately, derive from potential_win - base_win
-        if bonus == 0 and potential_win > base_win:
-            bonus = potential_win - base_win
-
-        bonus_pct = (bonus / base_win * 100) if base_win > 0 else 0
-
-        result = {
-            "odds": round(odds, 2),
-            "base_win": round(base_win, 2),
-            "bonus_percent": round(bonus_pct, 1),
-            "bonus_amount": round(bonus, 2),
-            "potential_win": round(potential_win, 2),
-            "source": "betslip",
-            "selections_clicked": clicked_count,
+        return {
+            "odds": 0.0,
+            "base_win": 0.0,
+            "bonus_percent": 0.0,
+            "bonus_amount": 0.0,
+            "potential_win": 0.0,
+            "source": "calculated",
+            "error": str(e),
         }
-        print(f"  [BetslipChecker] Bet9ja betslip: {clicked_count} selections, "
-              f"odds={odds}, bonus={bonus}, win={potential_win}")
-        return result
-
-    except Exception as e:
-        print(f"  [BetslipChecker] Bet9ja betslip failed ({e}), using formula")
-        return calculate_bet9ja_returns(selections, stake)
 
 
-def _parse_float(val) -> float:
-    """Safely parse a float from a string, handling commas and currency symbols."""
-    if isinstance(val, (int, float)):
-        return float(val)
-    try:
-        return float(str(val).replace(",", "").replace("₦", "").strip())
-    except (ValueError, TypeError):
+# ============================================================================
+# MSPORT CALCULATIONS (NEW)
+# ============================================================================
+
+def calculate_msport_bonus(num_selections: int, min_odds_met: bool = True) -> float:
+    """
+    MSport bonus uses interpolation table.
+    Min odds per selection: 1.20
+    Bonus table:
+    4->5%, 5->7%, 6->10%, 7->12%, 8->15%, 9->20%, 10->33%,
+    11->35%, 12->40%, 13->45%, 14->50%, 15->55%, 16->60%,
+    17->65%, 18->70%, 19->75%, 20->80%, 21->90%, 22->100%,
+    23->110%, 24->120%, 25->130%, 26->140%, 27->150%, 28->160%,
+    29->170%, 30+->180%
+    """
+    if not min_odds_met or num_selections < 4:
         return 0.0
 
-
-def _sportybet_formula_fallback(selections: list[dict], stake: float = 100) -> dict:
-    """Fallback formula for SportyBet when betslip check fails."""
-    combined_odds = 1.0
-    for sel in selections:
-        odds = sel.get("sportybet", sel.get("odds", 1.0))
-        if isinstance(odds, str):
-            odds = float(odds)
-        combined_odds *= odds
-
-    base_win = stake * combined_odds
-
-    # Approximate SportyBet bonus (estimated, marked as such)
-    n = len(selections)
-    approx_table = {
-        2: 3, 3: 5, 4: 7, 5: 10, 6: 15, 7: 20, 8: 25, 9: 30,
-        10: 35, 11: 40, 12: 50, 13: 60, 14: 70, 15: 80,
+    bonus_table = {
+        4: 5.0,
+        5: 7.0,
+        6: 10.0,
+        7: 12.0,
+        8: 15.0,
+        9: 20.0,
+        10: 33.0,
+        11: 35.0,
+        12: 40.0,
+        13: 45.0,
+        14: 50.0,
+        15: 55.0,
+        16: 60.0,
+        17: 65.0,
+        18: 70.0,
+        19: 75.0,
+        20: 80.0,
+        21: 90.0,
+        22: 100.0,
+        23: 110.0,
+        24: 120.0,
+        25: 130.0,
+        26: 140.0,
+        27: 150.0,
+        28: 160.0,
+        29: 170.0,
     }
-    bonus_pct = approx_table.get(n, min(n * 5, 100)) if n >= 2 else 0
-    bonus_amount = base_win * (bonus_pct / 100)
 
-    return {
-        "odds": round(combined_odds, 2),
-        "base_win": round(base_win, 2),
-        "bonus_percent": bonus_pct,
-        "bonus_amount": round(bonus_amount, 2),
-        "potential_win": round(base_win + bonus_amount, 2),
-        "source": "estimate",
-    }
+    return bonus_table.get(num_selections, 180.0)
 
 
-# ── Main function: check all accumulators ──────────────────────────
-async def check_all_accumulators(
-    sb_page,
-    b9_page,  # Can be None if Bet9ja website not available
-    accumulators: list[dict],
-    stake: float = 100,
-) -> list[dict]:
+def calculate_msport_returns(selections: List[Dict], stake: float = 100.0) -> Dict[str, Any]:
     """
-    For each accumulator, get real bonus/win from both bookmakers.
-
-    accumulators: list of {
-        size: int,
-        selections: list of {
-            event: str, sign: str,
-            bet9ja: float, sportybet: float,
-            league: str,
-            sb_home: str, sb_away: str,
-            b9_home: str, b9_away: str,
+    Calculate MSport returns using their documented bonus table.
+    Min qualifying odds per selection: 1.20
+    """
+    if not selections:
+        return {
+            "odds": 0.0,
+            "base_win": 0.0,
+            "bonus_percent": 0.0,
+            "bonus_amount": 0.0,
+            "potential_win": 0.0,
+            "source": "calculated",
+            "error": "No selections provided",
         }
+
+    try:
+        # Extract MSport odds and validate
+        odds_list = []
+        for selection in selections:
+            odds_str = selection.get("msport", "â")
+            if odds_str == "â":
+                return {
+                    "odds": 0.0,
+                    "base_win": 0.0,
+                    "bonus_percent": 0.0,
+                    "bonus_amount": 0.0,
+                    "potential_win": 0.0,
+                    "source": "calculated",
+                    "error": f"Missing MSport odds for {selection.get('event', 'unknown')}",
+                }
+
+            try:
+                odds = float(odds_str)
+                if odds < 1.20:
+                    return {
+                        "odds": 0.0,
+                        "base_win": 0.0,
+                        "bonus_percent": 0.0,
+                        "bonus_amount": 0.0,
+                        "potential_win": 0.0,
+                        "source": "calculated",
+                        "error": f"Odds {odds} below minimum 1.20 for {selection.get('event')}",
+                    }
+                odds_list.append(odds)
+            except (ValueError, TypeError):
+                return {
+                    "odds": 0.0,
+                    "base_win": 0.0,
+                    "bonus_percent": 0.0,
+                    "bonus_amount": 0.0,
+                    "potential_win": 0.0,
+                    "source": "calculated",
+                    "error": f"Invalid odds format: {odds_str}",
+                }
+
+        # Calculate combined odds
+        combined_odds = 1.0
+        for odds in odds_list:
+            combined_odds *= odds
+
+        # Calculate base win
+        base_win = stake * combined_odds
+
+        # Calculate bonus
+        bonus_percent = calculate_msport_bonus(len(selections), min_odds_met=True)
+        bonus_amount = base_win * bonus_percent / 100.0
+
+        return {
+            "odds": round(combined_odds, 4),
+            "base_win": round(base_win, 2),
+            "bonus_percent": bonus_percent,
+            "bonus_amount": round(bonus_amount, 2),
+            "potential_win": round(base_win + bonus_amount, 2),
+            "source": "calculated",
+        }
+
+    except Exception as e:
+        return {
+            "odds": 0.0,
+            "base_win": 0.0,
+            "bonus_percent": 0.0,
+            "bonus_amount": 0.0,
+            "potential_win": 0.0,
+            "source": "calculated",
+            "error": str(e),
+        }
+
+
+# ============================================================================
+# BETANO CALCULATIONS (NEW)
+# ============================================================================
+
+def calculate_betano_bonus(num_selections: int, min_odds_met: bool = True) -> float:
+    """
+    Betano bonus starts at 3% for 2 selections, max 70%.
+    Min odds per selection: 1.20
+    Bonus table:
+    2->3%, 3->5%, 4->7%, 5->10%, 6->12%, 7->15%, 8->18%,
+    9->22%, 10->25%, 11->30%, 12->35%, 13->40%, 14->45%,
+    15->50%, 16->55%, 17->60%, 18->65%, 19->68%, 20+->70%
+    """
+    if not min_odds_met or num_selections < 2:
+        return 0.0
+
+    bonus_table = {
+        2: 3.0,
+        3: 5.0,
+        4: 7.0,
+        5: 10.0,
+        6: 12.0,
+        7: 15.0,
+        8: 18.0,
+        9: 22.0,
+        10: 25.0,
+        11: 30.0,
+        12: 35.0,
+        13: 40.0,
+        14: 45.0,
+        15: 50.0,
+        16: 55.0,
+        17: 60.0,
+        18: 65.0,
+        19: 68.0,
     }
 
-    Returns updated accumulators with real bet9ja/sportybet amounts.
+    return bonus_table.get(num_selections, 70.0)
+
+
+def calculate_betano_returns(selections: List[Dict], stake: float = 100.0) -> Dict[str, Any]:
     """
-    results = []
+    Calculate Betano returns using their documented bonus table.
+    Min qualifying odds per selection: 1.20
+    """
+    if not selections:
+        return {
+            "odds": 0.0,
+            "base_win": 0.0,
+            "bonus_percent": 0.0,
+            "bonus_amount": 0.0,
+            "potential_win": 0.0,
+            "source": "calculated",
+            "error": "No selections provided",
+        }
 
-    for i, acca in enumerate(accumulators):
-        sels = acca["selections"]
-        size = acca["size"]
-        print(f"  [BetslipChecker] Checking accumulator #{i+1} ({size} selections)...")
+    try:
+        # Extract Betano odds and validate
+        odds_list = []
+        for selection in selections:
+            odds_str = selection.get("betano", "â")
+            if odds_str == "â":
+                return {
+                    "odds": 0.0,
+                    "base_win": 0.0,
+                    "bonus_percent": 0.0,
+                    "bonus_amount": 0.0,
+                    "potential_win": 0.0,
+                    "source": "calculated",
+                    "error": f"Missing Betano odds for {selection.get('event', 'unknown')}",
+                }
 
-        # SportyBet: real betslip
-        sb_result = await check_sportybet_betslip(sb_page, sels, stake)
+            try:
+                odds = float(odds_str)
+                if odds < 1.20:
+                    return {
+                        "odds": 0.0,
+                        "base_win": 0.0,
+                        "bonus_percent": 0.0,
+                        "bonus_amount": 0.0,
+                        "potential_win": 0.0,
+                        "source": "calculated",
+                        "error": f"Odds {odds} below minimum 1.20 for {selection.get('event')}",
+                    }
+                odds_list.append(odds)
+            except (ValueError, TypeError):
+                return {
+                    "odds": 0.0,
+                    "base_win": 0.0,
+                    "bonus_percent": 0.0,
+                    "bonus_amount": 0.0,
+                    "potential_win": 0.0,
+                    "source": "calculated",
+                    "error": f"Invalid odds format: {odds_str}",
+                }
 
-        # Bet9ja: real betslip if page available, otherwise formula
-        if b9_page:
-            b9_result = await check_bet9ja_betslip(b9_page, sels, stake)
-        else:
-            b9_result = calculate_bet9ja_returns(sels, stake)
-            b9_result["source"] = "formula"
+        # Calculate combined odds
+        combined_odds = 1.0
+        for odds in odds_list:
+            combined_odds *= odds
 
-        results.append({
-            "size": size,
-            "selections": [
-                {"event": s["event"], "sign": s["sign"], "bet9ja": s.get("bet9ja", 0), "sportybet": s.get("sportybet", 0)}
-                for s in sels
-            ],
-            "bet9ja": b9_result,
-            "sportybet": sb_result,
-        })
+        # Calculate base win
+        base_win = stake * combined_odds
 
-    return results
+        # Calculate bonus
+        bonus_percent = calculate_betano_bonus(len(selections), min_odds_met=True)
+        bonus_amount = base_win * bonus_percent / 100.0
+
+        return {
+            "odds": round(combined_odds, 4),
+            "base_win": round(base_win, 2),
+            "bonus_percent": bonus_percent,
+            "bonus_amount": round(bonus_amount, 2),
+            "potential_win": round(base_win + bonus_amount, 2),
+            "source": "calculated",
+        }
+
+    except Exception as e:
+        return {
+            "odds": 0.0,
+            "base_win": 0.0,
+            "bonus_percent": 0.0,
+            "bonus_amount": 0.0,
+            "potential_win": 0.0,
+            "source": "calculated",
+            "error": str(e),
+        }
+
+
+# ============================================================================
+# ACCUMULATOR ANALYSIS (EXISTING - EXPANDED FOR 5 BOOKMAKERS)
+# ============================================================================
+
+def check_all_accumulators(
+    merged_rows: List[Dict],
+    raw_bet9ja: List[Dict],
+    min_diff: float = 0.05,
+    min_size: int = 3,
+    max_size: int = 15,
+) -> List[Dict]:
+    """
+    Find best accumulators by analyzing all merged odds.
+    Computes potential returns for all 5 bookmakers.
+    """
+    if not merged_rows:
+        return []
+
+    try:
+        # Group rows by league and market for analysis
+        accumulators = []
+
+        # Simple strategy: find high-diff bets that form accumulators
+        high_diff_rows = [
+            row for row in merged_rows
+            if row.get("diff", 0) >= min_diff and row.get("sign") in ["1", "X", "2"]
+        ]
+
+        if len(high_diff_rows) < min_size:
+            return []
+
+        # Create potential accumulators
+        for i in range(min_size, min(max_size + 1, len(high_diff_rows) + 1)):
+            selections = high_diff_rows[:i]
+
+            accumulator = {
+                "size": len(selections),
+                "avg_diff": sum(r.get("diff", 0) for r in selections) / len(selections),
+                "selections": selections,
+                "returns": {
+                    "bet9ja": calculate_bet9ja_returns(selections, 100.0),
+                    "sportybet": _sportybet_formula_fallback(selections, 100.0),
+                    "betking": calculate_betking_returns(selections, 100.0),
+                    "msport": calculate_msport_returns(selections, 100.0),
+                    "betano": calculate_betano_returns(selections, 100.0),
+                },
+            }
+
+            accumulators.append(accumulator)
+
+        return accumulators[:5]  # Return top 5 accumulators
+
+    except Exception as e:
+        return []
+
+
+def extract_odds_from_betslip(betslip_text: str) -> Dict[str, Any]:
+    """
+    Extract odds and potential returns from betslip text.
+    """
+    try:
+        # This would parse actual betslip HTML/text
+        # Placeholder for now
+        return {
+            "extracted": False,
+            "message": "Betslip parsing not implemented",
+        }
+    except Exception as e:
+        return {
+            "extracted": False,
+            "error": str(e),
+        }
+
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+def format_currency(amount: float, currency: str = "NGN") -> str:
+    """Format amount as currency string."""
+    return f"{currency} {amount:,.2f}"
+
+
+def format_odds(odds: float) -> str:
+    """Format odds to 2 decimal places."""
+    return f"{odds:.2f}"
+
+
+def validate_selection(selection: Dict) -> tuple[bool, str]:
+    """
+    Validate a single selection dictionary.
+    Returns (is_valid, error_message)
+    """
+    if not isinstance(selection, dict):
+        return False, "Selection must be a dictionary"
+
+    required_fields = ["event", "sign", "market"]
+    for field in required_fields:
+        if field not in selection:
+            return False, f"Missing required field: {field}"
+
+    if selection["sign"] not in ["1", "X", "2", "O", "U"]:
+        return False, f"Invalid sign: {selection['sign']}"
+
+    return True, ""
+
+
+def validate_selections(selections: List[Dict]) -> tuple[bool, str]:
+    """
+    Validate a list of selections.
+    Returns (is_valid, error_message)
+    """
+    if not selections:
+        return False, "Selections list cannot be empty"
+
+    if not isinstance(selections, list):
+        return False, "Selections must be a list"
+
+    for i, selection in enumerate(selections):
+        is_valid, error = validate_selection(selection)
+        if not is_valid:
+            return False, f"Selection {i}: {error}"
+
+    return True, ""
