@@ -24,7 +24,7 @@ TOURNAMENT_URLS = {
 }
 
 # ── JS extraction for "3 Way & O/U" tab ────────────────────────
-# Returns 1X2 odds + O/U odds only when spread == 2.5
+# Returns 1X2 odds + O/U odds + current spread per match
 JS_EXTRACT_MAIN = """
 () => {
     const rows = document.querySelectorAll('.match-row');
@@ -40,6 +40,46 @@ JS_EXTRACT_MAIN = """
         }
     }
     return matches;
+}
+"""
+
+# ── JS: click a specific row's spread dropdown and select 2.5 ──
+# Takes rowIndex (0-based) — clicks the dropdown, picks "2.5", returns new O/U odds
+JS_CLICK_SPREAD = """
+(rowIndex) => {
+    return new Promise((resolve) => {
+        const rows = document.querySelectorAll('.match-row');
+        if (rowIndex >= rows.length) { resolve(null); return; }
+        const row = rows[rowIndex];
+
+        // Click the dropdown trigger to open it
+        const selectTitle = row.querySelector('.af-select-title') || row.querySelector('.af-select');
+        if (!selectTitle) { resolve(null); return; }
+        selectTitle.click();
+
+        // Wait for dropdown to open, then click 2.5
+        setTimeout(() => {
+            const openList = document.querySelector('.af-select-list.af-select-list-open');
+            if (!openList) { resolve(null); return; }
+            const items = [...openList.querySelectorAll('.af-select-item')];
+            const target = items.find(i => i.textContent.trim() === '2.5');
+            if (!target) {
+                // Close dropdown by clicking elsewhere
+                document.body.click();
+                resolve(null);
+                return;
+            }
+            target.click();
+
+            // Wait for odds to update after selection
+            setTimeout(() => {
+                const oddsEls = [...row.querySelectorAll('.m-outcome-odds')];
+                const odds = oddsEls.map(o => o.textContent.trim());
+                const newSpread = row.querySelector('.af-select-input')?.textContent?.trim() || '';
+                resolve({ odds, spread: newSpread });
+            }, 800);
+        }, 500);
+    });
 }
 """
 
@@ -226,29 +266,54 @@ async def _scrape_league(page, league_name: str, url: str, seen: set, max_matche
     raw_main = await page.evaluate(JS_EXTRACT_MAIN)
 
     # Build initial results with 1X2 + conditional O/U 2.5
+    # Also track which DOM row indices need dropdown interaction
     league_matches = []
-    skipped_ou = 0
+    rows_needing_ou = []  # (match_index, dom_row_index)
+    dom_index = 0
     for m in raw_main:
         key = f"{m['home']}-{m['away']}"
         if key in seen:
+            dom_index += 1
             continue
         seen.add(key)
         odds = _build_odds_dict(m)
         if odds:
             spread = m.get("spread", "")
-            if spread.strip() != "2.5" and len(m["odds"]) >= 5:
-                skipped_ou += 1
+            match_idx = len(league_matches)
             league_matches.append({
                 "event_id": key,
                 "event": f"{m['home']} - {m['away']}",
                 "league": league_name,
                 "odds": odds,
             })
+            # Track rows where spread != 2.5 but O/U odds exist (just wrong spread)
+            if spread.strip() != "2.5" and len(m["odds"]) >= 5:
+                rows_needing_ou.append((match_idx, dom_index))
+        dom_index += 1
         if current_count + len(league_matches) >= max_matches:
             break
 
-    if skipped_ou > 0:
-        print(f"  [SportyBet] {league_name}: skipped O/U for {skipped_ou} matches (spread != 2.5)")
+    # ── Step 1b: Click dropdown to select 2.5 for rows with non-2.5 spread ──
+    if rows_needing_ou:
+        print(f"  [SportyBet] {league_name}: fixing O/U spread for {len(rows_needing_ou)} matches...")
+        ou_fixed = 0
+        for match_idx, dom_row_idx in rows_needing_ou:
+            try:
+                result = await page.evaluate(JS_CLICK_SPREAD, dom_row_idx)
+                if result and result.get("spread", "").strip() == "2.5":
+                    odds_list = result["odds"]
+                    if len(odds_list) >= 5:
+                        league_matches[match_idx]["odds"]["O/U 2.5"] = {
+                            "Over": odds_list[3],
+                            "Under": odds_list[4],
+                        }
+                        ou_fixed += 1
+                # Small delay between dropdown interactions to avoid race conditions
+                await page.wait_for_timeout(300)
+            except Exception as e:
+                print(f"  [SportyBet] dropdown click failed for row {dom_row_idx}: {e}")
+                continue
+        print(f"  [SportyBet] {league_name}: fixed O/U for {ou_fixed}/{len(rows_needing_ou)} matches")
 
     # ── Step 2: Click "Double Chance" tab and scrape ──
     try:
