@@ -1,11 +1,10 @@
 """
 Odds Dashboard — FastAPI Backend
 ---------------------------------
-• Scrapes Bet9ja (Playwright) + SportyBet (API) on startup and every N minutes
-• Serves a live JSON API at  GET /api/odds
-• Serves the HTML dashboard at  GET /
+• Scrapes Bet9ja (JSON API) + SportyBet (Playwright) on startup and every N minutes
+• Serves a live JSON API at GET /api/odds
+• Serves the HTML dashboard at GET /
 """
-
 import asyncio
 import os
 from datetime import datetime
@@ -19,18 +18,17 @@ from bet9ja_scraper import scrape_bet9ja
 from sportybet_scraper import scrape_sportybet, fuzzy_match
 from dashboard import build_dashboard_html
 
-# ── Config ────────────────────────────────────────────────────────
+# ── Config ────────────────────────────────────────────────────────────
 REFRESH_MINUTES = int(os.getenv("REFRESH_MINUTES", "10"))
-MAX_MATCHES     = int(os.getenv("MAX_MATCHES", "40"))
+MAX_MATCHES    = int(os.getenv("MAX_MATCHES", "40"))
 
-# ── In-memory cache ───────────────────────────────────────────────
+# ── In-memory cache ────────────────────────────────────────────────────
 cache: dict = {
-    "rows":         [],
+    "rows": [],
     "last_updated": None,
-    "status":       "Initialising…",
+    "status": "Initialising\u2026",
     "is_refreshing": False,
 }
-
 scheduler = AsyncIOScheduler()
 
 
@@ -50,8 +48,8 @@ def _build_sportybet_map(bet9ja_matches: list[dict], sb_events: list[dict]) -> d
 
 def merge_odds(bet9ja_matches: list[dict], sportybet_map: dict) -> list[dict]:
     MARKETS = [
-        ("1X2",    ["1", "X", "2"]),
-        ("O/U 2.5",["Over", "Under"]),
+        ("1X2",           ["1", "X", "2"]),
+        ("O/U 2.5",       ["Over", "Under"]),
         ("Double Chance", ["1X", "12", "X2"]),
     ]
     rows = []
@@ -60,6 +58,7 @@ def merge_odds(bet9ja_matches: list[dict], sportybet_map: dict) -> list[dict]:
         league = match["league"]
         b9_odds = match.get("odds", {})
         sb_odds = sportybet_map.get(event, {})
+
         for market, signs in MARKETS:
             for sign in signs:
                 b9_val = b9_odds.get(market, {}).get(sign, "")
@@ -70,13 +69,17 @@ def merge_odds(bet9ja_matches: list[dict], sportybet_map: dict) -> list[dict]:
                 try:
                     b9_f = float(b9_val)
                     sb_f = float(sb_val)
-                    diff = round(sb_f - b9_f, 3)
+                    diff  = round(sb_f - b9_f, 3)
                 except (ValueError, TypeError):
                     pass
                 rows.append({
-                    "league": league, "event": event, "market": market,
-                    "sign": sign, "bet9ja": b9_val or "—",
-                    "sportybet": sb_val or "—", "diff": diff,
+                    "league":    league,
+                    "event":     event,
+                    "market":    market,
+                    "sign":      sign,
+                    "bet9ja":    b9_val or "\u2014",
+                    "sportybet": sb_val or "\u2014",
+                    "diff":      diff,
                 })
     rows.sort(key=lambda r: (-(r["diff"] or 0), r["league"], r["event"]))
     return rows
@@ -93,9 +96,35 @@ def _sb_only_rows(sb_events: list[dict]) -> list[dict]:
                 if not sb_val:
                     continue
                 rows.append({
-                    "league": ev.get("league", ""), "event": ev["event"],
-                    "market": market, "sign": sign, "bet9ja": "—",
-                    "sportybet": sb_val, "diff": None,
+                    "league":    ev.get("league", ""),
+                    "event":     ev["event"],
+                    "market":    market,
+                    "sign":      sign,
+                    "bet9ja":    "\u2014",
+                    "sportybet": sb_val,
+                    "diff":      None,
+                })
+    return rows
+
+
+def _b9_only_rows(b9_matches: list[dict]) -> list[dict]:
+    """Build rows from Bet9ja data alone (when SportyBet is unavailable)."""
+    MARKETS = [("1X2", ["1", "X", "2"]), ("O/U 2.5", ["Over", "Under"]), ("Double Chance", ["1X", "12", "X2"])]
+    rows = []
+    for match in b9_matches:
+        for market, signs in MARKETS:
+            for sign in signs:
+                b9_val = match.get("odds", {}).get(market, {}).get(sign, "")
+                if not b9_val:
+                    continue
+                rows.append({
+                    "league":    match.get("league", ""),
+                    "event":     match["event"],
+                    "market":    market,
+                    "sign":      sign,
+                    "bet9ja":    b9_val,
+                    "sportybet": "\u2014",
+                    "diff":      None,
                 })
     return rows
 
@@ -104,40 +133,43 @@ async def do_refresh():
     if cache["is_refreshing"]:
         print("[Scheduler] Already refreshing, skipping.")
         return
-
     cache["is_refreshing"] = True
-    cache["status"] = "Refreshing…"
+    cache["status"] = "Refreshing\u2026"
     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Starting refresh...")
 
     try:
-        # Bet9ja (Playwright) — may fail due to geo-blocking
+        # Bet9ja (JSON API) \u2014 may fail due to geo-blocking
         bet9ja_matches = []
         try:
             bet9ja_matches = await scrape_bet9ja(max_matches=MAX_MATCHES)
         except Exception as e:
             print(f"  [Bet9ja] Scraper failed: {e}")
 
-        # SportyBet (API) — always attempt
-        sb_events = await scrape_sportybet(max_matches=MAX_MATCHES)
+        # SportyBet (Playwright) \u2014 always attempt
+        sb_events = []
+        try:
+            sb_events = await scrape_sportybet(max_matches=MAX_MATCHES)
+        except Exception as e:
+            print(f"  [SportyBet] Scraper failed: {e}")
 
         if bet9ja_matches and sb_events:
             # Full comparison mode
             sportybet_map = _build_sportybet_map(bet9ja_matches, sb_events)
             rows = merge_odds(bet9ja_matches, sportybet_map)
-            cache["status"] = f"OK — {len(rows)} rows, {len(bet9ja_matches)} Bet9ja + {len(sb_events)} SportyBet"
+            cache["status"] = f"OK \u2014 {len(rows)} rows, {len(bet9ja_matches)} Bet9ja + {len(sb_events)} SportyBet"
         elif bet9ja_matches:
             # Bet9ja only
-            rows = merge_odds(bet9ja_matches, {})
-            cache["status"] = f"Bet9ja only — {len(rows)} rows (SportyBet unavailable)"
+            rows = _b9_only_rows(bet9ja_matches)
+            cache["status"] = f"Bet9ja only \u2014 {len(rows)} rows (SportyBet unavailable)"
         elif sb_events:
             # SportyBet only
             rows = _sb_only_rows(sb_events)
-            cache["status"] = f"SportyBet only — {len(rows)} rows (Bet9ja unavailable)"
+            cache["status"] = f"SportyBet only \u2014 {len(rows)} rows (Bet9ja unavailable)"
         else:
             rows = []
             cache["status"] = "No data from either source"
 
-        cache["rows"] = rows
+        cache["rows"]         = rows
         cache["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[Refresh] Done: {len(rows)} rows")
 
@@ -155,7 +187,6 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     yield
     scheduler.shutdown()
-
 
 app = FastAPI(title="Odds Dashboard", lifespan=lifespan)
 
