@@ -42,8 +42,15 @@ SECRET_KEY = "your-secret-key-change-in-production"
 MAX_MATCHES = 100
 REFRESH_INTERVAL_MINUTES = 5
 DB_PATH = "odds_history.db"
-SCRAPER_TIMEOUT_SECONDS = 120
-GATHER_TIMEOUT_SECONDS = 300
+SCRAPER_TIMEOUTS = {
+    "Bet9ja": 60,       # API-based, fast
+    "BetKing": 60,      # API-based, fast
+    "Betano": 60,       # API-based, fast
+    "SportyBet": 420,   # Playwright, needs 3-5 min for all leagues
+    "MSport": 300,      # Playwright, needs 2-4 min
+}
+DEFAULT_SCRAPER_TIMEOUT = 120
+GATHER_TIMEOUT_SECONDS = 600
 
 # Comprehensive team name aliases for major European leagues
 TEAM_ALIASES = {
@@ -295,7 +302,7 @@ TEAM_ALIASES = {
 cache = {
     "rows": [],
     "last_updated": None,
-    "status": "Initialising…",
+    "status": "Initialisingâ¦",
     "is_refreshing": False,
     "accumulators": [],
     "raw_bet9ja": [],
@@ -368,11 +375,11 @@ def save_odds_to_db(rows: list):
             row.get("event", ""),
             row.get("market", ""),
             row.get("sign", ""),
-            row.get("bet9ja", "—"),
-            row.get("sportybet", "—"),
-            row.get("betking", "—"),
-            row.get("msport", "—"),
-            row.get("betano", "—"),
+            row.get("bet9ja", "â"),
+            row.get("sportybet", "â"),
+            row.get("betking", "â"),
+            row.get("msport", "â"),
+            row.get("betano", "â"),
             row.get("diff", 0.0),
         ))
     conn.commit()
@@ -509,7 +516,7 @@ def merge_odds(raw_data: dict) -> list:
                     "markets": {},
                 }
             else:
-                print(f"  [Merge] Matched '{event_name}' ({bk_name}) → '{league_index[league][matched_key]['event']}' (reversed={is_reversed})")
+                print(f"  [Merge] Matched '{event_name}' ({bk_name}) â '{league_index[league][matched_key]['event']}' (reversed={is_reversed})")
 
             # Add this bookmaker's odds into the unified entry
             # SportyBet uses "odds" key, others use "markets"
@@ -548,7 +555,7 @@ def merge_odds(raw_data: dict) -> list:
                             row[bk_name] = f"{bk_odds[bk_name]:.2f}"
                             all_odds_values.append(bk_odds[bk_name])
                         else:
-                            row[bk_name] = "—"
+                            row[bk_name] = "â"
 
                     # Calculate difference
                     if len(all_odds_values) >= 2:
@@ -562,24 +569,28 @@ def merge_odds(raw_data: dict) -> list:
 
 
 async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_MATCHES):
-    """Safely scrape a bookmaker with error handling and timeout."""
+    """Safely scrape a bookmaker with error handling and per-scraper timeout."""
+    timeout = SCRAPER_TIMEOUTS.get(bookmaker_name, DEFAULT_SCRAPER_TIMEOUT)
     try:
         result = await asyncio.wait_for(
             scrape_func(max_matches=max_matches),
-            timeout=SCRAPER_TIMEOUT_SECONDS
+            timeout=timeout
         )
+        print(f"  [Scraper] {bookmaker_name} completed: {len(result)} events (timeout was {timeout}s)")
         return {
             "bookmaker": bookmaker_name,
             "data": result,
             "error": None,
         }
     except asyncio.TimeoutError:
+        print(f"  [Scraper] {bookmaker_name} TIMED OUT after {timeout}s")
         return {
             "bookmaker": bookmaker_name,
             "data": [],
-            "error": f"Scraper timeout after {SCRAPER_TIMEOUT_SECONDS}s",
+            "error": f"Scraper timeout after {timeout}s",
         }
     except Exception as e:
+        print(f"  [Scraper] {bookmaker_name} ERROR: {e}")
         return {
             "bookmaker": bookmaker_name,
             "data": [],
@@ -589,7 +600,7 @@ async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_M
 
 async def do_refresh():
     """Refresh odds from all 5 bookmakers concurrently."""
-    cache["status"] = "Refreshing…"
+    cache["status"] = "Refreshingâ¦"
     cache["is_refreshing"] = True
     try:
         # Scrape all bookmakers in parallel with global timeout
