@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from functools import wraps
 
 from fastapi import FastAPI, Request, Depends, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -24,6 +24,9 @@ from sportybet_scraper import scrape_sportybet
 from betking_scraper import scrape_betking
 from msport_scraper import scrape_msport
 from betano_scraper import scrape_betano
+
+# Import dashboard HTML builder
+from dashboard import build_dashboard_html
 
 # Import betslip checker with all return calculators
 from betslip_checker import (
@@ -45,7 +48,7 @@ DB_PATH = "odds_history.db"
 cache = {
     "rows": [],
     "last_updated": None,
-    "status": "Initialisingâ¦",
+    "status": "Initialising…",
     "is_refreshing": False,
     "accumulators": [],
     "raw_bet9ja": [],
@@ -119,11 +122,11 @@ def save_odds_to_db(rows: list):
             row.get("event", ""),
             row.get("market", ""),
             row.get("sign", ""),
-            row.get("bet9ja", "â"),
-            row.get("sportybet", "â"),
-            row.get("betking", "â"),
-            row.get("msport", "â"),
-            row.get("betano", "â"),
+            row.get("bet9ja", "—"),
+            row.get("sportybet", "—"),
+            row.get("betking", "—"),
+            row.get("msport", "—"),
+            row.get("betano", "—"),
             row.get("diff", 0.0),
         ))
 
@@ -189,7 +192,7 @@ def merge_odds(raw_data: dict) -> list:
                                 row["sportybet"] = f"{sb_odds:.2f}"
                                 all_odds_values.append(sb_odds)
                             except (ValueError, AttributeError):
-                                row["sportybet"] = "â"
+                                row["sportybet"] = "—"
                         break
 
                 # Find matching odds from BetKing
@@ -202,7 +205,7 @@ def merge_odds(raw_data: dict) -> list:
                                 row["betking"] = f"{bk_odds:.2f}"
                                 all_odds_values.append(bk_odds)
                             except (ValueError, AttributeError):
-                                row["betking"] = "â"
+                                row["betking"] = "—"
                         break
 
                 # Find matching odds from MSport
@@ -215,7 +218,7 @@ def merge_odds(raw_data: dict) -> list:
                                 row["msport"] = f"{ms_odds:.2f}"
                                 all_odds_values.append(ms_odds)
                             except (ValueError, AttributeError):
-                                row["msport"] = "â"
+                                row["msport"] = "—"
                         break
 
                 # Find matching odds from Betano
@@ -228,13 +231,13 @@ def merge_odds(raw_data: dict) -> list:
                                 row["betano"] = f"{bn_odds:.2f}"
                                 all_odds_values.append(bn_odds)
                             except (ValueError, AttributeError):
-                                row["betano"] = "â"
+                                row["betano"] = "—"
                         break
 
-                # Fill missing bookmakers with "â"
+                # Fill missing bookmakers with "—"
                 for bookmaker in ["sportybet", "betking", "msport", "betano"]:
                     if bookmaker not in row:
-                        row[bookmaker] = "â"
+                        row[bookmaker] = "—"
 
                 # Calculate difference
                 numeric_odds = [v for v in all_odds_values if isinstance(v, float)]
@@ -267,7 +270,7 @@ async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_M
 
 async def do_refresh():
     """Refresh odds from all 5 bookmakers concurrently."""
-    cache["status"] = "Refreshingâ¦"
+    cache["status"] = "Refreshing…"
     cache["is_refreshing"] = True
 
     try:
@@ -587,6 +590,60 @@ async def get_bookmakers(current_user: str = Depends(get_current_user)):
             {"name": "Betano", "code": "betano"},
         ]
     })
+
+
+# ============================================================================
+# DASHBOARD HTML ROUTES
+# ============================================================================
+
+LOGIN_HTML = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Odds Dashboard - Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f1923;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh}
+.login-box{background:#1a2634;padding:2rem;border-radius:12px;width:360px;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+h1{text-align:center;margin-bottom:1.5rem;color:#4fc3f7}
+input{width:100%;padding:.75rem;margin-bottom:1rem;border:1px solid #2d3e50;border-radius:8px;background:#0f1923;color:#e0e0e0;font-size:1rem}
+button{width:100%;padding:.75rem;background:#1976d2;color:#fff;border:none;border-radius:8px;font-size:1rem;cursor:pointer}
+button:hover{background:#1565c0}
+.error{color:#ef5350;text-align:center;margin-bottom:1rem;display:none}
+</style></head><body>
+<div class="login-box">
+<h1>Odds Dashboard</h1>
+<div class="error" id="err"></div>
+<input type="text" id="user" placeholder="Username" value="vinz">
+<input type="password" id="pass" placeholder="Password">
+<button onclick="doLogin()">Login</button>
+</div>
+<script>
+async function doLogin(){
+  const e=document.getElementById('err');e.style.display='none';
+  const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:document.getElementById('user').value,password:document.getElementById('pass').value})});
+  const d=await r.json();
+  if(r.ok){localStorage.setItem('token',d.token);window.location.href='/dashboard';}
+  else{e.textContent=d.detail||'Login failed';e.style.display='block';}
+}
+document.getElementById('pass').addEventListener('keypress',e=>{if(e.key==='Enter')doLogin();});
+</script></body></html>"""
+
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    """Redirect root to login page."""
+    return HTMLResponse('<meta http-equiv="refresh" content="0;url=/login">')
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    """Serve login page."""
+    return HTMLResponse(LOGIN_HTML)
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page():
+    """Serve main dashboard (requires valid token via JS)."""
+    return HTMLResponse(build_dashboard_html(cache))
 
 
 if __name__ == "__main__":
