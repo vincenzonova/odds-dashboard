@@ -622,15 +622,18 @@ async def do_refresh():
         # Scrape all bookmakers in parallel with global timeout
         # Run Bet9ja (API) in parallel with Playwright scrapers run sequentially
         # to avoid memory pressure from 3+ concurrent headless browsers
-        # Run ALL scrapers concurrently for maximum speed
-        # Bet9ja (API) + SportyBet + MSport + Betgr8 all at once
-        # Each Playwright scraper uses its own browser instance
-        results = await asyncio.gather(
+        async def _run_playwright_scrapers():
+            """Run Playwright scrapers one at a time to avoid OOM."""
+            r1 = await safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES)
+            r2 = await safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES)
+            r3 = await safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES)
+            return [r1, r2, r3]
+
+        bet9ja_result, playwright_results = await asyncio.gather(
             safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES),
-            safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES),
-            safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES),
-            safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES),
+            _run_playwright_scrapers(),
         )
+        results = [bet9ja_result] + playwright_results
 
         # Store raw data
         raw_data = {}
