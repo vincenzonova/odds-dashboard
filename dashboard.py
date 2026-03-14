@@ -107,16 +107,16 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 .row-count{{font-size:.78rem;color:#64748b;margin-top:10px;text-align:right}}
 
 /* -- Accumulator Cards ------------------------------ */
-.acca-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:16px}}
+.acca-grid{{display:grid;grid-template-columns:1fr;gap:16px;max-width:900px;margin:0 auto}}
 .acca-card{{background:#1a1d27;border:1px solid #2d3144;border-radius:12px;overflow:visible}}
 .acca-header{{padding:14px 18px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #2d3144}}
 .acca-size{{font-weight:700;font-size:1.05rem}} .acca-size span{{color:#6366f1}}
 .acca-body{{padding:14px 18px;overflow-x:auto}}
-.acca-body table{{width:100%;min-width:500px}}
+.acca-body table{{width:100%;min-width:600px;font-size:0.85em}}
 .sel-list{{list-style:none;padding:0;margin:0 0 14px}}
 .sel-item{{padding:4px 0;font-size:.8rem;color:#cbd5e1;display:flex;justify-content:space-between}}
 .sel-sign{{color:#6366f1;font-weight:700;margin-left:8px}}
-.bookmaker-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:10px;margin-top:12px}}
+.bookmaker-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}}
 .bm-box{{background:#0f1117;border-radius:8px;padding:12px;border:2px solid #2d3144;text-align:center;transition:all .2s}}
 .bm-box.bet9ja{{border-color:#22c55e}} .bm-box.bet9ja.best{{box-shadow:0 0 12px rgba(34,197,94,.3)}}
 .bm-box.sportybet{{border-color:#f59e0b}} .bm-box.sportybet.best{{box-shadow:0 0 12px rgba(245,158,11,.3)}}
