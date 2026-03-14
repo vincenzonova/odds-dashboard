@@ -312,8 +312,8 @@ function doSort() {{
       return sortAsc ? va - vb : vb - va;
     }}
     if (['bet9ja', 'sportybet', 'betking', 'msport', 'betano'].includes(sortCol)) {{
-      va = va === 'â' ? null : parseFloat(va);
-      vb = vb === 'â' ? null : parseFloat(vb);
+      va = va === '-' ? null : parseFloat(va);
+      vb = vb === '-' ? null : parseFloat(vb);
       if (va === null && vb === null) return 0;
       if (va === null) return 1;
       if (vb === null) return -1;
@@ -334,20 +334,20 @@ function renderTable() {{
     const r = filteredRows[idx];
     const odds = BOOKMAKERS.map(bm => {{
       const val = r[bm.key];
-      return val && val !== 'â' ? parseFloat(val) : null;
+      return val && val !== '-' ? parseFloat(val) : null;
     }}).filter(v => v !== null);
     const maxOdds = odds.length > 0 ? Math.max(...odds) : 0;
 
     const diff = r.diff;
-    let diffCls = 'diff-zero', diffTxt = 'â';
+    let diffCls = 'diff-zero', diffTxt = '-';
     if (diff !== null && diff !== undefined) {{
       diffTxt = (diff > 0 ? '+' : '') + diff.toFixed(3);
       diffCls = diff > 0 ? 'diff-pos' : diff < 0 ? 'diff-neg' : 'diff-zero';
     }}
 
     let cellsHtml = BOOKMAKERS.map(bm => {{
-      const val = r[bm.key] || 'â';
-      const numVal = val === 'â' ? 0 : parseFloat(val);
+      const val = r[bm.key] || '-';
+      const numVal = val === '-' ? 0 : parseFloat(val);
       const isBest = numVal > 0 && numVal === maxOdds;
       return `<td class="odds-cell ${{isBest ? 'best' : ''}}">${{val}}</td>`;
     }}).join('');
@@ -494,7 +494,7 @@ function createAccaCard(comp) {{
     html += `
       <div class="bm-box ${{bm.cls}} ${{isBest ? 'best' : ''}}">
         <div class="bm-name">${{bm.name}}</div>
-        <div class="bm-odds">${{val ? val.toFixed(2) : 'â'}}</div>
+        <div class="bm-odds">${{val ? val.toFixed(2) : '-'}}</div>
       </div>
     `;
   }});
