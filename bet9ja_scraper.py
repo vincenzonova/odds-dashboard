@@ -133,20 +133,21 @@ async def scrape_bet9ja(max_matches: int = 50, days: int = 2) -> list[dict]:
                         print(f"  [Bet9ja] DA={events[0].get('DA','?')} BP={events[0].get('BP','?')}")
                     for ev in events:
                         parsed = _parse_event(ev, league_name)
-                        # Filter by date range
+                        # Filter by date range (lenient: keep events if date can't be parsed)
                         if parsed and parsed.get("start_time"):
                             try:
-                                st = parsed["start_time"]
-                                for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+                                st = str(parsed["start_time"])
+                                event_dt = None
+                                for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%d/%m/%Y %H:%M", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%SZ"):
                                     try:
-                                        event_dt = datetime.strptime(st[:19], fmt)
-                                        if event_dt > cutoff:
-                                            parsed = None  # Beyond date range
+                                        event_dt = datetime.strptime(st[:19], fmt[:len(fmt)])
                                         break
                                     except ValueError:
                                         continue
+                                if event_dt and event_dt > cutoff:
+                                    parsed = None  # Beyond date range
                             except Exception:
-                                pass  # Keep event if can't parse date
+                                pass  # Keep event if date parsing fails
                         if parsed:
                             results.append(parsed)
                             added += 1
