@@ -239,7 +239,7 @@ async def _load_and_extract(page, url: str, date_str: str, timeout_ms: int = 250
             await page.wait_for_selector(".m-event", timeout=timeout_ms)
         except Exception:
             return []
-        await page.wait_for_timeout(3000)  # Allow DOM to fully render
+        await page.wait_for_timeout(1500)  # Allow DOM to fully render
         raw_matches = await page.evaluate(JS_EXTRACT_ALL)
         return raw_matches
     except Exception as e:
@@ -298,7 +298,7 @@ async def _switch_ou_line(page, target_line: str) -> bool:
             return False
 
         # Wait for odds to update in DOM
-        await page.wait_for_timeout(2500)
+        await page.wait_for_timeout(1500)
         print(f"  [MSport] Switched O/U line to {target_line}")
         return True
 
@@ -492,7 +492,7 @@ async def _scrape_date(page, date_str: str, is_today: bool, seen: set, max_match
 async def scrape_msport(max_matches: int = 200) -> list:
     """Main entry point for scraping MSport data.
 
-    Loads today + next 6 days to capture upcoming matches.
+    Loads today + next 3 days to capture upcoming matches.
     Uses tournament-filtered URLs and multi-pass extraction for all markets.
     """
     results = []
@@ -520,7 +520,7 @@ async def scrape_msport(max_matches: int = 200) -> list:
 
         # Scrape today + next 6 days
         today = datetime.now()
-        for day_offset in range(7):  # 7 days for good coverage
+        for day_offset in range(4):  # 7 days for good coverage
             if len(results) >= max_matches:
                 break
             target_date = today + timedelta(days=day_offset)
