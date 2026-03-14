@@ -860,9 +860,9 @@ async def api_custom_comparison(
         result = {
             "bet9ja": calculate_bet9ja_returns(selections, stake),
             "sportybet": _sportybet_formula_fallback(selections, stake),
-            "betking": calculate_betking_returns(selections, stake),
+            # "betking": calculate_betking_returns(selections, stake),  # PAUSED
             "msport": calculate_msport_returns(selections, stake),
-            "betano": calculate_betano_returns(selections, stake),
+            # "betano": calculate_betano_returns(selections, stake),  # PAUSED
             "selections": selections,
             "size": len(selections),
             "stake": stake,
