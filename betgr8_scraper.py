@@ -286,7 +286,9 @@ async def scrape_betgr8(max_matches: int = 100) -> List[dict]:
                 league_matches = await _scrape_league(page, league_name, base_url, remaining)
                 
                 for m in league_matches:
-                    key = (m["home"].lower(), m["away"].lower())
+                    ev = m["event"]
+                    parts = ev.split(" - ", 1)
+                    key = (parts[0].lower().strip(), parts[1].lower().strip()) if len(parts) == 2 else (ev.lower(), "")
                     if key not in seen:
                         seen.add(key)
                         all_matches.append(m)
