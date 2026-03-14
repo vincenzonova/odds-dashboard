@@ -489,10 +489,10 @@ async def _scrape_date(page, date_str: str, is_today: bool, seen: set, max_match
     return results
 
 
-async def scrape_msport(max_matches: int = 200) -> list:
+async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
     """Main entry point for scraping MSport data.
 
-    Loads today + next 6 days to capture upcoming matches.
+    Loads matches for the specified number of days (default 2).
     Uses tournament-filtered URLs and multi-pass extraction for all markets.
     """
     results = []
@@ -518,9 +518,9 @@ async def scrape_msport(max_matches: int = 200) -> list:
         except Exception:
             pass
 
-        # Scrape today + next 9 days
+        # Scrape for the configured number of days
         today = datetime.now()
-        for day_offset in range(10):  # 10 days for broader coverage
+        for day_offset in range(days):  # Uses days parameter from settings
             if len(results) >= max_matches:
                 break
             target_date = today + timedelta(days=day_offset)
