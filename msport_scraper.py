@@ -518,9 +518,9 @@ async def scrape_msport(max_matches: int = 200) -> list:
         except Exception:
             pass
 
-        # Scrape today + next 6 days
+        # Scrape today + next 9 days
         today = datetime.now()
-        for day_offset in range(7):  # 7 days for good coverage
+        for day_offset in range(10):  # 10 days for broader coverage
             if len(results) >= max_matches:
                 break
             target_date = today + timedelta(days=day_offset)
