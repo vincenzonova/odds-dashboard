@@ -199,6 +199,82 @@ def _parse_total_row(lines: List[str]) -> Optional[dict]:
     }
 
 
+
+
+async def _switch_spread_to_15(page) -> bool:
+    """Try to click the spread dropdown on the Total tab and switch to 1.5.
+    
+    Betgr8 Total tab shows a spread value (usually 2.5) with a dropdown indicator.
+    We look for clickable spread elements and try to select 1.5.
+    Returns True if switch succeeded.
+    """
+    try:
+        # Look for spread dropdown buttons/elements containing "2.5" with dropdown indicators
+        spread_buttons = await page.query_selector_all('button, span, div')
+        target = None
+        for el in spread_buttons:
+            text = await el.inner_text()
+            clean = text.strip().replace("\u2304", "").replace("\u25be", "")
+            if clean == "2.5" and ("\u2304" in text or "\u25be" in text or await el.evaluate('e => e.closest("[class*=\"dropdown\"]") !== null || e.querySelector("svg") !== null')):
+                target = el
+                break
+        
+        if not target:
+            # Try finding by looking at the page structure for spread selectors
+            target = await page.query_selector('[class*="spread"] button, [class*="handicap"] button, [class*="line"] button')
+        
+        if not target:
+            # Fallback: find any element showing "2.5" near odds columns
+            els = await page.query_selector_all('span, button')
+            for el in els:
+                text = (await el.inner_text()).strip()
+                if "2.5" in text and len(text) < 10:
+                    bbox = await el.bounding_box()
+                    if bbox and bbox.get("width", 0) < 100:
+                        target = el
+                        break
+        
+        if not target:
+            logger.info("[Total 1.5] No spread dropdown found, skipping O/U 1.5")
+            return False
+        
+        # Click to open dropdown
+        await target.click()
+        await asyncio.sleep(1.5)
+        
+        # Look for 1.5 option in the dropdown
+        option_15 = None
+        options = await page.query_selector_all('[class*="dropdown"] li, [class*="dropdown"] div, [class*="menu"] li, [role="option"], [role="listbox"] div')
+        for opt in options:
+            text = (await opt.inner_text()).strip()
+            if text == "1.5":
+                option_15 = opt
+                break
+        
+        if not option_15:
+            # Try broader search for any visible "1.5" element that appeared after click
+            all_els = await page.query_selector_all('li, div[role="option"], button')
+            for el in all_els:
+                text = (await el.inner_text()).strip()
+                if text == "1.5" and await el.is_visible():
+                    option_15 = el
+                    break
+        
+        if not option_15:
+            logger.info("[Total 1.5] Could not find 1.5 option in dropdown")
+            # Close dropdown by pressing Escape
+            await page.keyboard.press("Escape")
+            return False
+        
+        await option_15.click()
+        await asyncio.sleep(WAIT_SECONDS)
+        logger.info("[Total 1.5] Successfully switched spread to 1.5")
+        return True
+        
+    except Exception as e:
+        logger.warning(f"[Total 1.5] Spread switch failed: {e}")
+        return False
+
 # ─── MAIN SCRAPING LOGIC ──────────────────────────────────────────────────────
 
 async def _scrape_league(page, league_name: str, base_url: str, max_matches: int) -> List[dict]:
@@ -252,6 +328,29 @@ async def _scrape_league(page, league_name: str, base_url: str, max_matches: int
                     "Over": m["odds_over"],
                     "Under": m["odds_under"],
                 }
+
+    # --- Second pass: try to get O/U 1.5 from Total tab ---
+    try:
+        total_url = base_url + MARKET_TABS["Total"]
+        logger.info(f"[{league_name}] Navigating to Total tab for O/U 1.5 pass")
+        await page.goto(total_url, wait_until="domcontentloaded", timeout=30000)
+        await asyncio.sleep(WAIT_SECONDS)
+        
+        if await _switch_spread_to_15(page):
+            ou15_matches = await _extract_matches_from_tab(page, "Total")
+            for m in ou15_matches:
+                key = (m["home"].lower().strip(), m["away"].lower().strip())
+                if key in matches_by_key:
+                    entry = matches_by_key[key]
+                    spread = m.get("spread", 1.5)
+                    key_name = f"O/U {spread:g}"
+                    entry["markets"][key_name] = {
+                        "Over": m["odds_over"],
+                        "Under": m["odds_under"],
+                    }
+            logger.info(f"[{league_name}] O/U 1.5 pass extracted {len(ou15_matches)} matches")
+    except Exception as e:
+        logger.warning(f"[{league_name}] O/U 1.5 second pass failed: {e}")
 
     results = list(matches_by_key.values())[:max_matches]
     logger.info(f"[{league_name}] Total merged matches: {len(results)}")
