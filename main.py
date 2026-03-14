@@ -48,8 +48,8 @@ SCRAPER_TIMEOUTS = {
     # "BetKing": 60,      # PAUSED
     # "Betano": 60,       # PAUSED
     "SportyBet": 420,   # Playwright, needs 3-5 min for all leagues
-    "MSport": 420,      # Playwright, 7 days needs 4-6 min
-    "Betgr8": 300,      # Playwright, needs 2-4 min
+    "MSport": 600,      # Playwright, 10 days needs 6-8 min
+    "Betgr8": 420,      # Playwright, needs 4-5 min with O/U 1.5 pass-4 min
 }
 DEFAULT_SCRAPER_TIMEOUT = 120
 GATHER_TIMEOUT_SECONDS = 600
