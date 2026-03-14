@@ -35,7 +35,7 @@ MARKET_TABS = {
     "Total": "/17?marketCategoryId=16",
 }
 
-WAIT_SECONDS = 5  # seconds to wait for WebSocket data to render (reduced from 12)
+WAIT_SECONDS = 8  # seconds to wait for WebSocket data to render
 
 
 # ─── EXTRACTION HELPERS ────────────────────────────────────────────────────────
