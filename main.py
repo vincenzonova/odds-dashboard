@@ -36,6 +36,7 @@ from betslip_checker import (
     calculate_msport_returns,
     # calculate_betano_returns,  # PAUSED
     _sportybet_formula_fallback,
+    calculate_betgr8_returns,
 )
 
 # Configuration
@@ -944,6 +945,7 @@ async def api_custom_comparison(
             "sportybet": _sportybet_formula_fallback(selections, stake),
             # "betking": calculate_betking_returns(selections, stake),  # PAUSED
             "msport": calculate_msport_returns(selections, stake),
+            "betgr8": calculate_betgr8_returns(selections, stake),
             # "betano": calculate_betano_returns(selections, stake),  # PAUSED
             "selections": selections,
             "size": len(selections),
