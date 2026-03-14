@@ -524,9 +524,14 @@ def merge_odds(raw_data: dict) -> list:
                     "league": league,
                     "event": event_name,
                     "markets": {},
+                    "start_time": ev.get("start_time", ""),
                 }
             else:
                 print(f"  [Merge] Matched '{event_name}' ({bk_name}) -> '{league_index[league][matched_key]['event']}' (reversed={is_reversed})")
+
+            # Update start_time if this bookmaker has it and existing entry doesn't
+            if ev.get("start_time") and not league_index[league][matched_key].get("start_time"):
+                league_index[league][matched_key]["start_time"] = ev["start_time"]
 
             # Add this bookmaker's odds into the unified entry
             # SportyBet uses "odds" key, others use "markets"
@@ -558,6 +563,7 @@ def merge_odds(raw_data: dict) -> list:
                         "event": event_name,
                         "market": market,
                         "sign": sign,
+                        "start_time": entry.get("start_time", ""),
                     }
                     all_odds_values = []
                     for bk_name in BOOKMAKERS:
@@ -616,16 +622,15 @@ async def do_refresh():
         # Scrape all bookmakers in parallel with global timeout
         # Run Bet9ja (API) in parallel with Playwright scrapers run sequentially
         # to avoid memory pressure from 3+ concurrent headless browsers
-        async def _run_playwright_scrapers():
-            r1 = await safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES)
-            r2 = await safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES)
-            r3 = await safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES)
-            return [r1, r2, r3]
-
-        bet9ja_task = asyncio.create_task(safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES))
-        pw_results = await _run_playwright_scrapers()
-        bet9ja_result = await bet9ja_task
-        results = [bet9ja_result] + pw_results
+        # Run ALL scrapers concurrently for maximum speed
+        # Bet9ja (API) + SportyBet + MSport + Betgr8 all at once
+        # Each Playwright scraper uses its own browser instance
+        results = await asyncio.gather(
+            safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES),
+            safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES),
+            safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES),
+            safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES),
+        )
 
         # Store raw data
         raw_data = {}
