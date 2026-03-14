@@ -226,8 +226,7 @@ async def _scrape_league(page, league_name: str, base_url: str, max_matches: int
             
             if key not in matches_by_key:
                 matches_by_key[key] = {
-                    "home": m["home"],
-                    "away": m["away"],
+                    "event": f"{m['home']} - {m['away']}",
                     "league": league_name,
                     "markets": {}
                 }
@@ -248,7 +247,7 @@ async def _scrape_league(page, league_name: str, base_url: str, max_matches: int
                 }
             elif market_type == "Total":
                 spread = m.get("spread", 2.5)
-                key_name = f"O/U {spread}"
+                key_name = f"O/U {spread:g}"
                 entry["markets"][key_name] = {
                     "Over": m["odds_over"],
                     "Under": m["odds_under"],
@@ -309,7 +308,7 @@ def format_output(matches: List[dict]) -> str:
     
     lines = []
     for m in matches:
-        lines.append(f"\n{m['home']} vs {m['away']} ({m['league']})")
+        lines.append(f"\n{m['event']} ({m['league']})")
         for market_name, odds in m.get("markets", {}).items():
             odds_str = " | ".join(f"{k}: {v}" for k, v in odds.items())
             lines.append(f"  {market_name}: {odds_str}")
