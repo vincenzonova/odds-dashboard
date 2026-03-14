@@ -1,10 +1,11 @@
 """
 MSport Scraper - uses Playwright to render the page and extract odds from DOM.
-MSport's website is accessible without VPN from Amsterdam.
 
-Uses tournament-specific URLs to filter by league, bypassing MSport's 50-event
-DOM cap on the generic Soccer page. Each target league has a Sportradar
-tournament ID that MSport uses for filtering.
+MSport's website is accessible without VPN from Amsterdam.
+Uses tournament-specific URLs to filter by league, bypassing MSport's
+50-event DOM cap on the generic Soccer page.
+
+Each target league has a Sportradar tournament ID that MSport uses for filtering.
 
 Extracts:
 - 1X2 odds (first market on each event)
@@ -47,13 +48,17 @@ TOURNAMENT_FILTER = ",".join(TOURNAMENT_IDS.values())
 LEAGUE_MAP = {
     # England
     "England - Premier League": "Premier League",
+
     # Spain
     "Spain - LaLiga": "La Liga",
     "Spain - La Liga": "La Liga",
+
     # Italy
     "Italy - Serie A": "Serie A",
+
     # Germany
     "Germany - Bundesliga": "Bundesliga",
+
     # France
     "France - Ligue 1": "Ligue 1",
 
@@ -79,48 +84,45 @@ LEAGUE_MAP = {
 # JS to extract all matches from the page, including O/U line value
 JS_EXTRACT_ALL = """
 () => {
-    const tournaments = document.querySelectorAll('.m-tournament');
-    const results = [];
-    for (const t of tournaments) {
-        const titleEl = t.querySelector('.m-tournament--title');
-        const league = titleEl ? titleEl.textContent.replace(/\\s+/g, ' ').trim() : '';
-        const events = t.querySelectorAll('.m-event');
-        for (const ev of events) {
-            const nameWrappers = ev.querySelectorAll('.m-server-name-wrapper');
-            const teams = [...nameWrappers].map(n => n.textContent.trim());
-            if (teams.length < 2 || !teams[0] || !teams[1]) continue;
-
-            const markets = ev.querySelectorAll('.m-market');
-            const marketData = [];
-            let ouLine = null;
-
-            for (let i = 0; i < markets.length; i++) {
-                const mkt = markets[i];
-                const outcomes = mkt.querySelectorAll('.m-outcome');
-                const odds = [...outcomes].map(o => {
-                    const oddsEl = o.querySelector('.odds');
-                    return oddsEl ? oddsEl.textContent.trim() : null;
-                }).filter(Boolean);
-                marketData.push(odds);
-
-                // Second market is O/U - read the line value from the span
-                if (i === 1) {
-                    const lineSpan = mkt.querySelector('span');
-                    if (lineSpan) {
-                        ouLine = lineSpan.textContent.trim();
-                    }
-                }
-            }
-            results.push({
-                league: league,
-                home: teams[0],
-                away: teams[1],
-                markets: marketData,
-                ouLine: ouLine
-            });
+  const tournaments = document.querySelectorAll('.m-tournament');
+  const results = [];
+  for (const t of tournaments) {
+    const titleEl = t.querySelector('.m-tournament--title');
+    const league = titleEl ? titleEl.textContent.replace(/\\s+/g, ' ').trim() : '';
+    const events = t.querySelectorAll('.m-event');
+    for (const ev of events) {
+      const nameWrappers = ev.querySelectorAll('.m-server-name-wrapper');
+      const teams = [...nameWrappers].map(n => n.textContent.trim());
+      if (teams.length < 2 || !teams[0] || !teams[1]) continue;
+      const markets = ev.querySelectorAll('.m-market');
+      const marketData = [];
+      let ouLine = null;
+      for (let i = 0; i < markets.length; i++) {
+        const mkt = markets[i];
+        const outcomes = mkt.querySelectorAll('.m-outcome');
+        const odds = [...outcomes].map(o => {
+          const oddsEl = o.querySelector('.odds');
+          return oddsEl ? oddsEl.textContent.trim() : null;
+        }).filter(Boolean);
+        marketData.push(odds);
+        // Second market is O/U - read the line value from the span
+        if (i === 1) {
+          const lineSpan = mkt.querySelector('span');
+          if (lineSpan) {
+            ouLine = lineSpan.textContent.trim();
+          }
         }
+      }
+      results.push({
+        league: league,
+        home: teams[0],
+        away: teams[1],
+        markets: marketData,
+        ouLine: ouLine
+      });
     }
-    return results;
+  }
+  return results;
 }
 """
 
@@ -160,8 +162,8 @@ def _build_match_dict(raw_match: dict, league_name: str) -> dict:
     away = raw_match["away"]
     markets = raw_match.get("markets", [])
     ou_line = raw_match.get("ouLine")
-
     odds = {}
+
     # First market = 1X2 (3 outcomes: 1, X, 2)
     if len(markets) >= 1 and len(markets[0]) >= 3:
         odds["1X2"] = {
@@ -188,33 +190,74 @@ def _build_match_dict(raw_match: dict, league_name: str) -> dict:
     }
 
 
-async def _scrape_date(page, date_str: str, seen: set, max_matches: int) -> list:
+async def _load_and_extract(page, url: str, date_str: str, timeout_ms: int = 25000) -> list:
+    """Load a URL and extract raw matches. Returns empty list on failure."""
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+        # Wait for network to settle (API calls to load events)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            # networkidle can hang on persistent connections, that's OK
+            pass
+
+        # Wait for match elements to appear
+        try:
+            await page.wait_for_selector(".m-event", timeout=timeout_ms)
+        except Exception:
+            return []
+
+        # Extra wait for odds values to populate in DOM
+        await page.wait_for_timeout(3000)
+
+        raw_matches = await page.evaluate(JS_EXTRACT_ALL)
+        return raw_matches
+    except Exception as e:
+        print(f"    [MSport] Error loading {url}: {e}")
+        return []
+
+
+async def _scrape_date(page, date_str: str, is_today: bool, seen: set, max_matches: int) -> list:
     """Scrape matches for a specific date using tournament-filtered URL.
 
-    Instead of loading the generic Soccer page (which caps at 50 events across
-    ALL leagues), we use the tournament filter parameter to show ONLY our target
-    leagues. This bypasses the 50-event cap since we typically have <40 target
-    league matches per day.
+    Instead of loading the generic Soccer page (which caps at 50 events
+    across ALL leagues), we use the tournament filter parameter to show
+    ONLY our target leagues.
+
+    For today's date, uses a retry strategy:
+    1. First try with d=d-{date} parameter (same as future dates)
+    2. If that returns 0, retry WITHOUT the d parameter (MSport default = today)
+    3. If still 0, try loading individual tournament URLs
     """
     url = f"{MSPORT_BASE}?d=d-{date_str}&t={TOURNAMENT_FILTER}"
     results = []
 
     try:
-        print(f"  [MSport] Loading {date_str} (filtered to target leagues)...")
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        print(f"    [MSport] Loading {date_str} (filtered to target leagues)...")
+        raw_matches = await _load_and_extract(page, url, date_str)
 
-        # Wait for match elements to appear
-        try:
-            await page.wait_for_selector(".m-event", timeout=15000)
-        except Exception:
-            print(f"  [MSport] No matches found for {date_str}")
+        # Retry strategy for today if combined URL fails
+        if not raw_matches and is_today:
+            print(f"    [MSport] Retrying {date_str} without date parameter...")
+            url_no_date = f"{MSPORT_BASE}?t={TOURNAMENT_FILTER}"
+            raw_matches = await _load_and_extract(page, url_no_date, date_str, timeout_ms=30000)
+
+        # If still no matches for today, try individual tournament URLs
+        if not raw_matches and is_today:
+            print(f"    [MSport] Retrying {date_str} with individual tournament URLs...")
+            for league_name, tid in TOURNAMENT_IDS.items():
+                url_single = f"{MSPORT_BASE}?d=d-{date_str}&t={tid}"
+                single_matches = await _load_and_extract(page, url_single, date_str, timeout_ms=20000)
+                if single_matches:
+                    raw_matches.extend(single_matches)
+                    print(f"    [MSport] {date_str}: {league_name} -> {len(single_matches)} events via individual URL")
+
+        if not raw_matches:
+            print(f"    [MSport] No matches found for {date_str}")
             return results
 
-        # Extra wait for odds to populate
-        await page.wait_for_timeout(3000)
-
-        raw_matches = await page.evaluate(JS_EXTRACT_ALL)
-        print(f"  [MSport] {date_str}: found {len(raw_matches)} events on filtered page")
+        print(f"    [MSport] {date_str}: found {len(raw_matches)} events on filtered page")
 
         matched = 0
         skipped_league = 0
@@ -241,15 +284,15 @@ async def _scrape_date(page, date_str: str, seen: set, max_matches: int) -> list
                 results.append(match_dict)
                 matched += 1
 
-            # Track O/U line info
-            ou_line = raw.get("ouLine")
-            if ou_line and ou_line != "2.5":
-                skipped_ou += 1
+                # Track O/U line info
+                ou_line = raw.get("ouLine")
+                if ou_line and ou_line != "2.5":
+                    skipped_ou += 1
 
-        print(f"  [MSport] {date_str}: {matched} matched, {skipped_league} skipped (wrong league), {skipped_ou} with non-2.5 O/U line")
+        print(f"    [MSport] {date_str}: {matched} matched, {skipped_league} skipped (wrong league), {skipped_ou} with non-2.5 O/U line")
 
     except Exception as e:
-        print(f"  [MSport] Error scraping {date_str}: {e}")
+        print(f"    [MSport] Error scraping {date_str}: {e}")
 
     return results
 
@@ -282,19 +325,32 @@ async def scrape_msport(max_matches: int = 200) -> list:
             lambda r: r.abort(),
         )
 
+        # Pre-warm: load MSport homepage to set cookies/session
+        # This prevents first-page-load issues (cookie banners, etc.)
+        try:
+            await page.goto(MSPORT_BASE, wait_until="domcontentloaded", timeout=20000)
+            await page.wait_for_timeout(2000)
+        except Exception:
+            pass  # Non-fatal, continue with scraping
+
         # Scrape today + next 6 days (full week)
         today = datetime.now()
         for day_offset in range(7):
             if len(results) >= max_matches:
                 break
+
             target_date = today + timedelta(days=day_offset)
             date_str = target_date.strftime("%Y-%m-%d")
-            day_results = await _scrape_date(page, date_str, seen, max_matches - len(results))
+            is_today = (day_offset == 0)
+
+            day_results = await _scrape_date(
+                page, date_str, is_today, seen, max_matches - len(results)
+            )
             results.extend(day_results)
 
         await browser.close()
 
-    print(f"  [MSport] Done - {len(results)} matches total")
+    print(f"    [MSport] Done - {len(results)} matches total")
     return results
 
 
