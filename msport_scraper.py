@@ -2,6 +2,10 @@
 MSport Scraper - uses Playwright to render the page and extract odds from DOM.
 MSport's website is accessible without VPN from Amsterdam.
 
+Uses tournament-specific URLs to filter by league, bypassing MSport's 50-event
+DOM cap on the generic Soccer page. Each target league has a Sportradar
+tournament ID that MSport uses for filtering.
+
 Extracts:
 - 1X2 odds (first market on each event)
 - Over/Under 2.5 (second market - only when the displayed line is 2.5)
@@ -21,6 +25,23 @@ from playwright.async_api import async_playwright
 
 MSPORT_BASE = "https://www.msport.com/ng/web/sports/list/Soccer"
 
+# Sportradar tournament IDs used by MSport for URL filtering
+# Format: &t=sr:tournament:ID (can be comma-separated for multiple)
+TOURNAMENT_IDS = {
+    "Premier League": "sr:tournament:17",
+    "La Liga": "sr:tournament:8",
+    "Serie A": "sr:tournament:23",
+    "Bundesliga": "sr:tournament:35",
+    "Ligue 1": "sr:tournament:34",
+    "Champions League": "sr:tournament:7",
+    "Europa League": "sr:tournament:679",
+    "Conference League": "sr:tournament:34480",
+}
+
+# Build the combined tournament filter parameter for URLs
+# This filters the page to ONLY show our target leagues
+TOURNAMENT_FILTER = ",".join(TOURNAMENT_IDS.values())
+
 # Map MSport league names (from DOM) to our standard names
 # MSport uses both "Europe -" and "International Clubs -" prefixes
 LEAGUE_MAP = {
@@ -35,13 +56,16 @@ LEAGUE_MAP = {
     "Germany - Bundesliga": "Bundesliga",
     # France
     "France - Ligue 1": "Ligue 1",
+
     # European competitions - "International Clubs" prefix (current MSport format)
     "International Clubs - UEFA Champions League": "Champions League",
     "International Clubs - Champions League": "Champions League",
     "International Clubs - UEFA Europa League": "Europa League",
     "International Clubs - Europa League": "Europa League",
     "International Clubs - UEFA Europa Conference League": "Conference League",
+    "International Clubs - UEFA Conference League": "Conference League",
     "International Clubs - Conference League": "Conference League",
+
     # European competitions - "Europe" prefix (legacy / fallback)
     "Europe - Champions League": "Champions League",
     "Europe - UEFA Champions League": "Champions League",
@@ -49,6 +73,7 @@ LEAGUE_MAP = {
     "Europe - UEFA Europa League": "Europa League",
     "Europe - Conference League": "Conference League",
     "Europe - UEFA Europa Conference League": "Conference League",
+    "Europe - UEFA Conference League": "Conference League",
 }
 
 # JS to extract all matches from the page, including O/U line value
@@ -56,11 +81,9 @@ JS_EXTRACT_ALL = """
 () => {
     const tournaments = document.querySelectorAll('.m-tournament');
     const results = [];
-
     for (const t of tournaments) {
         const titleEl = t.querySelector('.m-tournament--title');
         const league = titleEl ? titleEl.textContent.replace(/\\s+/g, ' ').trim() : '';
-
         const events = t.querySelectorAll('.m-event');
         for (const ev of events) {
             const nameWrappers = ev.querySelectorAll('.m-server-name-wrapper');
@@ -88,7 +111,6 @@ JS_EXTRACT_ALL = """
                     }
                 }
             }
-
             results.push({
                 league: league,
                 home: teams[0],
@@ -140,7 +162,6 @@ def _build_match_dict(raw_match: dict, league_name: str) -> dict:
     ou_line = raw_match.get("ouLine")
 
     odds = {}
-
     # First market = 1X2 (3 outcomes: 1, X, 2)
     if len(markets) >= 1 and len(markets[0]) >= 3:
         odds["1X2"] = {
@@ -168,12 +189,18 @@ def _build_match_dict(raw_match: dict, league_name: str) -> dict:
 
 
 async def _scrape_date(page, date_str: str, seen: set, max_matches: int) -> list:
-    """Scrape matches for a specific date."""
-    url = f"{MSPORT_BASE}?d=d-{date_str}"
+    """Scrape matches for a specific date using tournament-filtered URL.
+
+    Instead of loading the generic Soccer page (which caps at 50 events across
+    ALL leagues), we use the tournament filter parameter to show ONLY our target
+    leagues. This bypasses the 50-event cap since we typically have <40 target
+    league matches per day.
+    """
+    url = f"{MSPORT_BASE}?d=d-{date_str}&t={TOURNAMENT_FILTER}"
     results = []
 
     try:
-        print(f"  [MSport] Loading {date_str}...")
+        print(f"  [MSport] Loading {date_str} (filtered to target leagues)...")
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
         # Wait for match elements to appear
@@ -187,7 +214,7 @@ async def _scrape_date(page, date_str: str, seen: set, max_matches: int) -> list
         await page.wait_for_timeout(3000)
 
         raw_matches = await page.evaluate(JS_EXTRACT_ALL)
-        print(f"  [MSport] {date_str}: found {len(raw_matches)} total events on page")
+        print(f"  [MSport] {date_str}: found {len(raw_matches)} events on filtered page")
 
         matched = 0
         skipped_league = 0
@@ -197,7 +224,8 @@ async def _scrape_date(page, date_str: str, seen: set, max_matches: int) -> list
             if len(results) >= max_matches:
                 break
 
-            # Filter to target leagues only
+            # Filter to target leagues only (should all match since URL is filtered,
+            # but keep this as a safety check)
             league_name = _normalize_league(raw["league"])
             if league_name is None:
                 skipped_league += 1
@@ -212,10 +240,11 @@ async def _scrape_date(page, date_str: str, seen: set, max_matches: int) -> list
             if match_dict["odds"]:  # Only add if we got some odds
                 results.append(match_dict)
                 matched += 1
-                # Track O/U line info
-                ou_line = raw.get("ouLine")
-                if ou_line and ou_line != "2.5":
-                    skipped_ou += 1
+
+            # Track O/U line info
+            ou_line = raw.get("ouLine")
+            if ou_line and ou_line != "2.5":
+                skipped_ou += 1
 
         print(f"  [MSport] {date_str}: {matched} matched, {skipped_league} skipped (wrong league), {skipped_ou} with non-2.5 O/U line")
 
@@ -225,11 +254,17 @@ async def _scrape_date(page, date_str: str, seen: set, max_matches: int) -> list
     return results
 
 
-async def scrape_msport(max_matches: int = 50) -> list:
+async def scrape_msport(max_matches: int = 200) -> list:
     """
     Main entry point for scraping MSport data.
+
     Loads today + next 6 days (full week) to capture upcoming matches.
     CL matches are Tue/Wed, EL/ECL on Thursday - need 7 days to always cover them.
+
+    Uses tournament-filtered URLs so each page load only shows our target leagues,
+    bypassing MSport's 50-event DOM cap on the generic Soccer page.
+
+    max_matches raised to 200 since we now get all target league matches reliably.
     """
     results = []
     seen = set()
@@ -266,7 +301,8 @@ async def scrape_msport(max_matches: int = 50) -> list:
 async def main():
     """Main execution function."""
     import json
-    matches = await scrape_msport(max_matches=100)
+
+    matches = await scrape_msport(max_matches=200)
     print(json.dumps(matches, indent=2))
 
 
