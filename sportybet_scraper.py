@@ -365,7 +365,7 @@ async def _scrape_league(page, league_name: str, url: str, seen: set,
     return league_matches
 
 
-async def scrape_sportybet(max_matches: int = 50) -> list[dict]:
+async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
     results = []
     seen = set()
 
