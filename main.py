@@ -22,6 +22,7 @@ from bet9ja_scraper import scrape_bet9ja
 from sportybet_scraper import scrape_sportybet
 # from betking_scraper import scrape_betking  # PAUSED - geo-blocked
 from msport_scraper import scrape_msport
+from betgr8_scraper import scrape_betgr8
 # from betano_scraper import scrape_betano  # PAUSED - timeout issues
 
 # Import dashboard HTML builder
@@ -48,6 +49,7 @@ SCRAPER_TIMEOUTS = {
     # "Betano": 60,       # PAUSED
     "SportyBet": 420,   # Playwright, needs 3-5 min for all leagues
     "MSport": 300,      # Playwright, needs 2-4 min
+    "Betgr8": 300,      # Playwright, needs 2-4 min
 }
 DEFAULT_SCRAPER_TIMEOUT = 120
 GATHER_TIMEOUT_SECONDS = 600
@@ -310,6 +312,7 @@ cache = {
     "raw_betking": [],
     "raw_msport": [],
     "raw_betano": [],
+    "raw_betgr8": [],
     "match_name_map": {},
 }
 
@@ -345,6 +348,7 @@ def init_db():
             betking TEXT,
             msport TEXT,
             betano TEXT,
+            betgr8 TEXT,
             diff REAL
         )
     """)
@@ -367,8 +371,8 @@ def save_odds_to_db(rows: list):
     timestamp = datetime.now().isoformat()
     for row in rows:
         cursor.execute("""
-            INSERT INTO odds_history (timestamp, league, event, market, sign, bet9ja, sportybet, betking, msport, betano, diff)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO odds_history (timestamp, league, event, market, sign, bet9ja, sportybet, betking, msport, betano, betgr8, diff)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             timestamp,
             row.get("league", ""),
@@ -380,6 +384,7 @@ def save_odds_to_db(rows: list):
             row.get("betking", "-"),
             row.get("msport", "-"),
             row.get("betano", "-"),
+            row.get("betgr8", "-"),
             row.get("diff", 0.0),
         ))
     conn.commit()
@@ -481,7 +486,7 @@ def merge_odds(raw_data: dict) -> list:
     Uses a unified event index built from all bookmakers, with league-based grouping
     for faster and more accurate matching.
     """
-    BOOKMAKERS = ["bet9ja", "sportybet", "msport"]  # betking & betano PAUSED
+    BOOKMAKERS = ["bet9ja", "sportybet", "msport", "betgr8"]  # betking & betano PAUSED
 
     # Build league index: league -> {event_key -> event_data}
     league_index = {}
@@ -610,6 +615,7 @@ async def do_refresh():
                 safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES),
                 # safe_scrape("BetKing", scrape_betking, max_matches=MAX_MATCHES),  # PAUSED
                 safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES),
+            safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES),
                 # safe_scrape("Betano", scrape_betano, max_matches=MAX_MATCHES),  # PAUSED
             ),
             timeout=GATHER_TIMEOUT_SECONDS
@@ -628,6 +634,7 @@ async def do_refresh():
         cache["raw_sportybet"] = raw_data.get("sportybet", [])
         # cache["raw_betking"] = raw_data.get("betking", [])  # PAUSED
         cache["raw_msport"] = raw_data.get("msport", [])
+        cache["raw_betgr8"] = raw_data.get("betgr8", [])
         # cache["raw_betano"] = raw_data.get("betano", [])  # PAUSED
 
         # Merge odds from all bookmakers
