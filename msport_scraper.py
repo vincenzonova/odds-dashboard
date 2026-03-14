@@ -102,7 +102,13 @@ JS_EXTRACT_ALL = """
         const outcomes = mkt.querySelectorAll('.m-outcome');
         const odds = [...outcomes].map(o => {
           const oddsEl = o.querySelector('.odds');
-          return oddsEl ? oddsEl.textContent.trim() : null;
+          if (!oddsEl) return null;
+          // Handle "Best Odds": .odds may contain .reference-odds child
+          // Clone to avoid modifying DOM, remove reference element
+          const clone = oddsEl.cloneNode(true);
+          const ref = clone.querySelector('.reference-odds');
+          if (ref) ref.remove();
+          return clone.textContent.trim();
         }).filter(Boolean);
         marketData.push(odds);
         // Second market is O/U - read the line value from the span
@@ -156,6 +162,14 @@ def _normalize_league(msport_league: str) -> str:
     return LEAGUE_MAP.get(msport_league)
 
 
+def _clean_odds(val: str) -> str:
+    """Clean odds value: handle newlines from MSport 'Best Odds' feature."""
+    if not val or not isinstance(val, str):
+        return val
+    # Best Odds feature puts reference price on next line
+    return val.split('\n')[0].strip()
+
+
 def _build_match_dict(raw_match: dict, league_name: str) -> dict:
     """Build a match dict from raw extracted data."""
     home = raw_match["home"]
@@ -167,17 +181,17 @@ def _build_match_dict(raw_match: dict, league_name: str) -> dict:
     # First market = 1X2 (3 outcomes: 1, X, 2)
     if len(markets) >= 1 and len(markets[0]) >= 3:
         odds["1X2"] = {
-            "1": markets[0][0],
-            "X": markets[0][1],
-            "2": markets[0][2],
+            "1": _clean_odds(markets[0][0]),
+            "X": _clean_odds(markets[0][1]),
+            "2": _clean_odds(markets[0][2]),
         }
 
     # Second market = O/U - only use if line is 2.5
     if len(markets) >= 2 and len(markets[1]) >= 2:
         if ou_line == "2.5":
             odds["O/U 2.5"] = {
-                "Over": markets[1][0],
-                "Under": markets[1][1],
+                "Over": _clean_odds(markets[1][0]),
+                "Under": _clean_odds(markets[1][1]),
             }
         else:
             # Log when we skip non-2.5 lines for debugging
