@@ -42,6 +42,7 @@ from betslip_checker import (
 # Configuration
 SECRET_KEY = "your-secret-key-change-in-production"
 MAX_MATCHES = 100
+SCRAPE_DAYS = 2  # Default: scrape next 2 days. Configurable via settings (1-10)
 REFRESH_INTERVAL_MINUTES = 5
 DB_PATH = "odds_history.db"
 SCRAPER_TIMEOUTS = {
@@ -659,12 +660,12 @@ def merge_odds(raw_data: dict) -> list:
     return merged_rows
 
 
-async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_MATCHES):
+async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_MATCHES, days: int = None):
     """Safely scrape a bookmaker with error handling and per-scraper timeout."""
     timeout = SCRAPER_TIMEOUTS.get(bookmaker_name, DEFAULT_SCRAPER_TIMEOUT)
     try:
         result = await asyncio.wait_for(
-            scrape_func(max_matches=max_matches),
+            scrape_func(max_matches=max_matches) if days is None else scrape_func(max_matches=max_matches, days=days),
             timeout=timeout
         )
         print(f"  [Scraper] {bookmaker_name} completed: {len(result)} events (timeout was {timeout}s)")
@@ -699,13 +700,13 @@ async def do_refresh():
         # to avoid memory pressure from 3+ concurrent headless browsers
         async def _run_playwright_scrapers():
             """Run Playwright scrapers one at a time to avoid OOM."""
-            r1 = await safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES)
-            r2 = await safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES)
-            r3 = await safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES)
+            r1 = await safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES, days=SCRAPE_DAYS)
+            r2 = await safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES, days=SCRAPE_DAYS)
+            r3 = await safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES, days=SCRAPE_DAYS)
             return [r1, r2, r3]
 
         bet9ja_result, playwright_results = await asyncio.gather(
-            safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES),
+            safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
             _run_playwright_scrapers(),
         )
         results = [bet9ja_result] + playwright_results
@@ -915,6 +916,30 @@ async def manual_refresh(current_user: str = Depends(get_current_user)):
 # ============================================================================
 # ACCUMULATOR & BETSLIP ENDPOINTS
 # ============================================================================
+
+
+@app.get("/api/settings")
+async def get_settings(current_user: str = Depends(get_current_user)):
+    """Get current dashboard settings."""
+    global SCRAPE_DAYS
+    return JSONResponse({"scrape_days": SCRAPE_DAYS})
+
+
+@app.post("/api/settings")
+async def update_settings(request: Request, current_user: str = Depends(get_current_user)):
+    """Update dashboard settings."""
+    global SCRAPE_DAYS
+    body = await request.json()
+    new_days = body.get("scrape_days")
+    if new_days is not None:
+        new_days = int(new_days)
+        if 1 <= new_days <= 10:
+            SCRAPE_DAYS = new_days
+            return JSONResponse({"scrape_days": SCRAPE_DAYS, "message": f"Scrape range updated to {SCRAPE_DAYS} days"})
+        else:
+            raise HTTPException(status_code=400, detail="scrape_days must be between 1 and 10")
+    raise HTTPException(status_code=400, detail="No valid settings provided")
+
 
 @app.post("/api/custom-comparison")
 async def api_custom_comparison(
