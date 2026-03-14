@@ -471,7 +471,7 @@ async def _scrape_date(page, date_str: str, is_today: bool, seen: set, max_match
         for dc in dc_data:
             key = f"{dc['home']}-{dc['away']}"
             if key in match_map:
-                match_map[key]["odds"]["DC"] = {
+                match_map[key]["odds"]["Double Chance"] = {
                     "1X": dc["1X"],
                     "12": dc["12"],
                     "X2": dc["X2"],
