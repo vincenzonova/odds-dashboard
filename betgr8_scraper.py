@@ -1,351 +1,469 @@
 """
-Betgr8 Scraper — uses Playwright to load the site and intercept API/DOM odds.
+Betgr8 Scraper — uses Playwright to intercept API responses from ng.api.betgr8.com
+and scrapes sports odds.
 
-The Betgr8 site uses the "Nazgul" platform (single-spa + Svelte sportsbook).
-The sportsbook makes API calls to ng.api.betgr8.com for odds data.
-
-This scraper:
-1. Loads the Betgr8 football page in Playwright
-2. Intercepts API responses containing odds data
-3. Parses the responses to extract 1X2, O/U 2.5, O/U 1.5, and Double Chance
-4. Falls back to DOM extraction if API interception fails
+The Betgr8 website (betgr8.com/ng) uses a Nazgul API to fetch sports/events data.
+The scraper intercepts these API calls and parses the responses to extract match odds.
 
 Extracts:
-- 1X2 odds
-- Over/Under 2.5
-- Over/Under 1.5
-- Double Chance
+  • 1X2 odds (match winner)
+  • Over/Under markets (various spreads)
+  • Double Chance and other market types
 """
-
 import asyncio
 import json
-import re
+import logging
 from playwright.async_api import async_playwright
+from typing import Any, Dict, List, Optional
 
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGGING CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-BETGR8_BASE = "https://betgr8.com/ng/sport/football"
-
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
 LEAGUE_URLS = {
-    "Premier League": f"{BETGR8_BASE}/england/premier-league",
-    "La Liga": f"{BETGR8_BASE}/spain/la-liga",
-    "Serie A": f"{BETGR8_BASE}/italy/serie-a",
-    "Bundesliga": f"{BETGR8_BASE}/germany/bundesliga",
-    "Ligue 1": f"{BETGR8_BASE}/france/ligue-1",
-    "Champions League": f"{BETGR8_BASE}/champions-league",
-    "Europa League": f"{BETGR8_BASE}/europa-league",
+    "Premier League": "https://betgr8.com/ng/sport/football/england/premier-league",
+    "La Liga": "https://betgr8.com/ng/sport/football/spain/la-liga",
+    "Serie A": "https://betgr8.com/ng/sport/football/italy/serie-a",
+    "Bundesliga": "https://betgr8.com/ng/sport/football/germany/bundesliga",
+    "Ligue 1": "https://betgr8.com/ng/sport/football/france/ligue-1",
+    "Champions League": "https://betgr8.com/ng/sport/football/champions-league",
+    "Europa League": "https://betgr8.com/ng/sport/football/europa-league",
 }
 
-# -- JS to extract odds from the rendered DOM --
-JS_EXTRACT_EVENTS = """
-() => {
-    const events = [];
-    const rows = document.querySelectorAll(
-        '.event-row, .match-row, .prematch-event, [data-event-id], .event-item'
-    );
-    for (const row of rows) {
-        const teams = row.querySelectorAll(
-            '.team-name, .participant-name, .event-name span, .competitor'
-        );
-        const home = teams[0]?.textContent?.trim() || '';
-        const away = teams[1]?.textContent?.trim() || '';
-        if (!home || !away) continue;
+# Target API patterns to intercept (skip modals, latest-winners, etc)
+RELEVANT_API_PATTERNS = [
+    "sb/pal/sports",
+    "sportsbook",
+]
 
-        const oddsEls = row.querySelectorAll(
-            '.odd-value, .odds-value, .outcome-odds, .market-odds button, [data-odd]'
-        );
-        const odds = [...oddsEls].map(o =>
-            o.textContent?.trim() || o.getAttribute('data-odd') || ''
-        ).filter(o => o && !isNaN(parseFloat(o)));
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPER FUNCTIONS FOR PARSING
+# ─────────────────────────────────────────────────────────────────────────────
 
-        events.push({ home, away, odds });
-    }
-    return events;
-}
-"""
+def _log_api_response_summary(url: str, data: Any, response_num: int = None) -> None:
+    """
+    Log a summary of an API response for debugging.
+    Shows URL, top-level keys (if dict), length (if list), and first 300 chars.
+    """
+    prefix = f"[Response #{response_num}]" if response_num else "[Response]"
+    logger.debug(f"{prefix} URL: {url}")
+
+    if isinstance(data, dict):
+        keys = list(data.keys())
+        logger.debug(f"{prefix} Type: dict | Keys: {keys}")
+        json_str = json.dumps(data)[:300]
+        logger.debug(f"{prefix} Content (first 300 chars): {json_str}")
+    elif isinstance(data, list):
+        logger.debug(f"{prefix} Type: list | Length: {len(data)}")
+        if data and isinstance(data[0], dict):
+            logger.debug(f"{prefix} First item keys: {list(data[0].keys())}")
+        json_str = json.dumps(data)[:300]
+        logger.debug(f"{prefix} Content (first 300 chars): {json_str}")
+    else:
+        logger.debug(f"{prefix} Type: {type(data).__name__}")
 
 
-def _parse_api_events(api_data, league_name: str) -> list:
-    """Parse events from various Nazgul API response formats."""
+def _find_arrays_recursively(obj: Any, target_depth: int = 5, current_depth: int = 0) -> List[tuple]:
+    """
+    Recursively search through a nested structure and find all arrays/lists.
+    Returns list of (path, array, array_length) tuples.
+    """
     results = []
-    events_list = []
 
-    if isinstance(api_data, list):
-        events_list = api_data
-    elif isinstance(api_data, dict):
-        # Common Nazgul response patterns
-        for key in ["events", "matches", "items", "result"]:
-            candidate = api_data.get(key, [])
-            if isinstance(candidate, list) and candidate:
-                events_list = candidate
+    if current_depth > target_depth:
+        return results
+
+    if isinstance(obj, list):
+        results.append(("", obj, len(obj)))
+
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(value, list):
+                results.append((key, value, len(value)))
+            elif isinstance(value, dict):
+                nested = _find_arrays_recursively(value, target_depth, current_depth + 1)
+                for path, arr, length in nested:
+                    full_path = f"{key}.{path}" if path else key
+                    results.append((full_path, arr, length))
+
+    return results
+
+def _is_match_like(obj: Any) -> bool:
+    """
+    Check if an object looks like a match/event entry.
+    Should have participant/team info and odds-like data.
+    """
+    if not isinstance(obj, dict):
+        return False
+
+    match_indicators = [
+        "name", "title", "event", "match",
+        "competitor", "participants", "competitors",
+        "teams", "home", "away",
+        "odds", "markets", "outcomes", "selections",
+        "id", "eventId", "matchId", "pk",
+    ]
+
+    keys = set(obj.keys())
+    count = sum(1 for ind in match_indicators if ind in keys)
+    return count >= 2
+
+
+def _parse_api_events(api_data: Any, league_name: str) -> List[dict]:
+    """
+    Parse API response to extract match events and their odds.
+    Tries multiple parsing strategies:
+    1. Look for common top-level keys: sports, events, matches, competitions
+    2. Look for nested structures like data.sports[].categories[].events[]
+    3. Recursively search for arrays containing match-like objects
+    """
+    matches = []
+
+    if not isinstance(api_data, dict):
+        logger.warning(f"[Parser] API data is not a dict: {type(api_data).__name__}")
+        return matches
+
+    logger.debug(f"[Parser] Attempting to parse API response for {league_name}")
+
+    # Strategy 1: Check for direct top-level keys
+    direct_keys = ["sports", "events", "matches", "items", "competitions", "leagues"]
+    for key in direct_keys:
+        if key in api_data and isinstance(api_data[key], list):
+            logger.debug(f"[Parser] Found top-level '{key}' array with {len(api_data[key])} items")
+            matches.extend(_parse_event_array(api_data[key], key, league_name))
+            if matches:
+                return matches
+
+    # Strategy 2: Look for nested structures
+    nested_paths = [
+        ("data", ["sports", "events", "matches"]),
+        ("data", ["competitions", "events"]),
+        ("data", ["leagues", "matches"]),
+        ("data", ["categories", "events"]),
+        ("result", ["sports", "events"]),
+        ("payload", ["events"]),
+        ("body", ["events", "matches"]),
+    ]
+
+    for root_key, subkeys in nested_paths:
+        if root_key not in api_data:
+            continue
+
+        current = api_data[root_key]
+        full_path = root_key
+
+        for subkey in subkeys:
+            if isinstance(current, dict) and subkey in current:
+                current = current[subkey]
+                full_path = f"{full_path}.{subkey}"
+            elif isinstance(current, list):
+                found_in_list = False
+                for item in current:
+                    if isinstance(item, dict) and subkey in item:
+                        current = item[subkey]
+                        full_path = f"{full_path}[].{subkey}"
+                        found_in_list = True
+                        break
+                if not found_in_list:
+                    break
+            else:
                 break
-        # Nested data.events
-        if not events_list and isinstance(api_data.get("data"), dict):
-            events_list = api_data["data"].get("events", [])
-        # Nested competitions
-        if not events_list:
-            for comp in api_data.get("competitions", api_data.get("categories", [])):
-                if isinstance(comp, dict):
-                    events_list.extend(comp.get("events", comp.get("matches", [])))
 
-    for ev in events_list:
-        if not isinstance(ev, dict):
+        if isinstance(current, list) and current:
+            logger.debug(f"[Parser] Found nested path '{full_path}' with {len(current)} items")
+            matches.extend(_parse_event_array(current, full_path, league_name))
+            if matches:
+                return matches
+
+    # Strategy 3: Recursively find all arrays and check for match-like objects
+    logger.debug(f"[Parser] Attempting recursive search for match-like arrays")
+    arrays = _find_arrays_recursively(api_data, target_depth=5)
+    arrays.sort(key=lambda x: x[2], reverse=True)
+
+    for path, arr, length in arrays[:10]:
+        if length < 1:
             continue
-        home, away = _extract_team_names(ev)
-        if not home or not away:
+
+        match_count = sum(1 for item in arr[:5] if _is_match_like(item))
+
+        if match_count >= 2:
+            logger.debug(f"[Parser] Found match-like array at path '{path}' ({length} items, {match_count}/5 look like matches)")
+            matches.extend(_parse_event_array(arr, path, league_name))
+            if matches:
+                return matches
+        else:
+            logger.debug(f"[Parser] Array at path '{path}' ({length} items) doesn't look like matches")
+
+    logger.warning(f"[Parser] Could not find any event arrays in API response for {league_name}")
+    return matches
+
+
+def _parse_event_array(events_array: List[Any], source_path: str, league_name: str) -> List[dict]:
+    matches = []
+    logger.debug(f"[Parser] Parsing event array from '{source_path}' ({len(events_array)} items)")
+
+    for event_idx, event in enumerate(events_array):
+        if not isinstance(event, dict):
             continue
 
-        event_name = f"{home} - {away}"
-        odds = {}
-        _extract_all_markets(ev, odds)
+        event_name = None
+        for name_key in ["name", "title", "event", "description"]:
+            if name_key in event and isinstance(event[name_key], str):
+                event_name = event[name_key]
+                break
 
-        if odds:
-            results.append({
-                "event_id": str(ev.get("id", ev.get("eventId", event_name))),
+        if not event_name:
+            logger.debug(f"[Parser] Event #{event_idx} has no recognizable name field. Keys: {list(event.keys())[:10]}")
+            continue
+
+        markets = _extract_markets_from_event(event, event_name)
+
+        if markets:
+            match_entry = {
                 "event": event_name,
                 "league": league_name,
-                "odds": odds,
-            })
+                "markets": markets,
+            }
+            matches.append(match_entry)
+            logger.debug(f"[Parser] Extracted match: {event_name} with {len(markets)} markets")
+        else:
+            logger.debug(f"[Parser] Event '{event_name}' has no extractable markets")
 
-    return results
-
-
-def _extract_team_names(ev: dict) -> tuple:
-    """Extract home and away team names from event dict."""
-    home = ""
-    away = ""
-
-    # Try nested team objects
-    for h_key in ["homeTeam", "home", "team1"]:
-        obj = ev.get(h_key)
-        if isinstance(obj, dict):
-            home = obj.get("name", obj.get("title", ""))
-            break
-        elif isinstance(obj, str) and obj:
-            home = obj
-            break
-
-    for a_key in ["awayTeam", "away", "team2"]:
-        obj = ev.get(a_key)
-        if isinstance(obj, dict):
-            away = obj.get("name", obj.get("title", ""))
-            break
-        elif isinstance(obj, str) and obj:
-            away = obj
-            break
-
-    # Try competitors array
-    if not home or not away:
-        comps = ev.get("competitors", [])
-        if len(comps) >= 2:
-            home = comps[0].get("name", "") if isinstance(comps[0], dict) else str(comps[0])
-            away = comps[1].get("name", "") if isinstance(comps[1], dict) else str(comps[1])
-
-    # Try event name splitting
-    if not home or not away:
-        event_name = ev.get("name", ev.get("eventName", ""))
-        if " - " in event_name:
-            parts = event_name.split(" - ", 1)
-            home, away = parts[0].strip(), parts[1].strip()
-        elif " vs " in event_name.lower():
-            parts = event_name.lower().split(" vs ", 1)
-            home, away = parts[0].strip(), parts[1].strip()
-
-    return home, away
+    logger.info(f"[Parser] Successfully parsed {len(matches)} matches from '{source_path}'")
+    return matches
 
 
-def _extract_all_markets(ev: dict, odds: dict):
-    """Extract all market odds from event data."""
-    markets = ev.get("markets", ev.get("odds", ev.get("betOptions", [])))
+def _extract_markets_from_event(event: dict, event_name: str) -> dict:
+    markets = {}
+    market_keys = ["markets", "odds", "selections", "outcomes", "betting_markets"]
 
-    if isinstance(markets, list):
-        for mkt in markets:
-            if not isinstance(mkt, dict):
-                continue
-            mkt_name = (
-                mkt.get("name", "") or mkt.get("marketName", "") or
-                mkt.get("type", "") or mkt.get("marketType", "")
-            ).lower()
-            outcomes = mkt.get("outcomes", mkt.get("selections", mkt.get("odds", [])))
-            if isinstance(outcomes, list):
-                _process_market(mkt_name, mkt, outcomes, odds)
-    elif isinstance(markets, dict):
-        for mkt_key, mkt_data in markets.items():
-            if isinstance(mkt_data, dict):
-                mkt_name = mkt_data.get("name", mkt_key).lower()
-                outcomes = mkt_data.get("outcomes", mkt_data.get("selections", []))
-                if isinstance(outcomes, list):
-                    _process_market(mkt_name, mkt_data, outcomes, odds)
+    for key in market_keys:
+        if key not in event:
+            continue
+
+        market_data = event[key]
+
+        if isinstance(market_data, dict):
+            _parse_market_dict(market_data, markets, event_name)
+        elif isinstance(market_data, list):
+            _parse_market_list(market_data, markets, event_name)
+
+    return markets
 
 
-def _process_market(mkt_name: str, mkt: dict, outcomes: list, odds: dict):
-    """Process a single market and add odds to the odds dict."""
-    # 1X2 / Match Result
-    if any(k in mkt_name for k in ["1x2", "match result", "full time result", "3way", "3-way", "three way"]):
-        for out in outcomes:
-            if not isinstance(out, dict):
-                continue
-            name = (out.get("name", "") or out.get("label", "") or out.get("type", "")).strip()
-            val = out.get("odds", out.get("price", out.get("value", "")))
-            if not val:
-                continue
-            val_str = str(val)
-            if name in ("1", "Home", "W1", "home"):
-                odds.setdefault("1X2", {})["1"] = val_str
-            elif name in ("X", "Draw", "draw"):
-                odds.setdefault("1X2", {})["X"] = val_str
-            elif name in ("2", "Away", "W2", "away"):
-                odds.setdefault("1X2", {})["2"] = val_str
-
-    # Over/Under
-    elif any(k in mkt_name for k in ["over/under", "over under", "total", "o/u"]):
-        spread = str(mkt.get("spread", mkt.get("line", mkt.get("handicap",
-                     mkt.get("total", ""))))).strip()
-        for out in outcomes:
-            if not isinstance(out, dict):
-                continue
-            name = (out.get("name", "") or out.get("label", "") or out.get("type", "")).lower().strip()
-            val = out.get("odds", out.get("price", out.get("value", "")))
-            if not val:
-                continue
-            val_str = str(val)
-            # Try to detect spread from outcome name
-            out_spread = spread
-            if not out_spread or out_spread in ("None", ""):
-                m = re.search(r"(\d+\.?\d*)", name)
-                if m:
-                    out_spread = m.group(1)
-            if out_spread == "2.5":
-                if "over" in name or name == "o":
-                    odds.setdefault("O/U 2.5", {})["Over"] = val_str
-                elif "under" in name or name == "u":
-                    odds.setdefault("O/U 2.5", {})["Under"] = val_str
-            elif out_spread == "1.5":
-                if "over" in name or name == "o":
-                    odds.setdefault("O/U 1.5", {})["Over"] = val_str
-                elif "under" in name or name == "u":
-                    odds.setdefault("O/U 1.5", {})["Under"] = val_str
-
-    # Double Chance
-    elif "double chance" in mkt_name:
-        for out in outcomes:
-            if not isinstance(out, dict):
-                continue
-            name = (out.get("name", "") or out.get("label", "") or out.get("type", "")).strip()
-            val = out.get("odds", out.get("price", out.get("value", "")))
-            if not val:
-                continue
-            val_str = str(val)
-            if name in ("1X", "Home or Draw", "1x"):
-                odds.setdefault("Double Chance", {})["1X"] = val_str
-            elif name in ("12", "Home or Away", "1 or 2"):
-                odds.setdefault("Double Chance", {})["12"] = val_str
-            elif name in ("X2", "Draw or Away", "x2"):
-                odds.setdefault("Double Chance", {})["X2"] = val_str
+def _parse_market_dict(market_dict: dict, target_markets: dict, event_name: str) -> None:
+    for market_name, market_value in market_dict.items():
+        if isinstance(market_value, dict):
+            if market_value:
+                target_markets[market_name] = market_value
+                logger.debug(f"  Market '{market_name}': {market_value}")
+        elif isinstance(market_value, list):
+            extracted = _extract_odds_from_list(market_value)
+            if extracted:
+                target_markets[market_name] = extracted
 
 
-async def _scrape_league(page, league_name: str, url: str, captured_responses: list) -> list:
-    """Scrape a single league page."""
+def _parse_market_list(market_list: list, target_markets: dict, event_name: str) -> None:
+    for market_obj in market_list:
+        if not isinstance(market_obj, dict):
+            continue
+
+        market_name = None
+        for name_key in ["name", "type", "marketType"]:
+            if name_key in market_obj:
+                market_name = market_obj[name_key]
+                break
+
+        if not market_name:
+            continue
+
+        odds = None
+        for odds_key in ["odds", "outcomes", "selections", "choices"]:
+            if odds_key in market_obj:
+                odds_data = market_obj[odds_key]
+                if isinstance(odds_data, dict):
+                    odds = odds_data
+                    break
+                elif isinstance(odds_data, list):
+                    odds = _extract_odds_from_list(odds_data)
+                    break
+
+        if odds:
+            target_markets[market_name] = odds
+
+
+def _extract_odds_from_list(odds_list: list) -> dict:
+    result = {}
+    for item in odds_list:
+        if isinstance(item, dict):
+            name = item.get("name") or item.get("title") or item.get("outcome")
+            odds = item.get("odds") or item.get("price") or item.get("value")
+            if name and odds:
+                result[str(name)] = str(odds)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PLAYWRIGHT AUTOMATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _should_intercept_request(url: str) -> bool:
+    url_lower = url.lower()
+    for pattern in RELEVANT_API_PATTERNS:
+        if pattern in url_lower:
+            return True
+    return False
+
+
+async def _scrape_league(browser, league_name: str, url: str, seen: set,
+                        max_matches: int, current_count: int) -> List[dict]:
     results = []
-    captured_responses.clear()
+    captured_responses = {}
+    response_counter = [0]
+
+    page = await browser.new_page()
+
+    async def handle_response(response):
+        url = response.url
+        if not await _should_intercept_request(url):
+            return
+
+        try:
+            response_counter[0] += 1
+            response_num = response_counter[0]
+
+            try:
+                body = await response.json()
+            except:
+                logger.debug(f"[Response #{response_num}] Could not parse JSON from {url}")
+                return
+
+            logger.debug(f"[Response #{response_num}] Captured: {url}")
+            _log_api_response_summary(url, body, response_num)
+
+            if url not in captured_responses:
+                captured_responses[url] = body
+
+        except Exception as e:
+            logger.error(f"Error capturing response from {url}: {e}")
+
+    page.on("response", handle_response)
+
+    await page.route("**/*.{png,jpg,jpeg,gif,webp,woff,woff2,svg}",
+                     lambda r: r.abort())
+
+    logger.info(f"[Scraper] Loading {league_name} from {url}")
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(3000)
+    except Exception as e:
+        logger.error(f"[Scraper] Failed to load {league_name}: {e}")
+        await page.close()
+        return results
 
     try:
-        print(f"  [Betgr8] Loading {league_name}...")
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        page_content = await page.content()
+        logger.debug(f"[Scraper] Page source captured ({len(page_content)} chars)")
 
-        # Wait for sportsbook to potentially load and make API calls
-        await page.wait_for_timeout(8000)
-
-        # Check if we captured any API responses
-        if captured_responses:
-            print(f"  [Betgr8] {league_name}: captured {len(captured_responses)} API responses")
-            for resp_data in captured_responses:
+        import re
+        json_matches = re.findall(r'<script[^>]*>(.*?)</script>', page_content, re.DOTALL)
+        for match in json_matches:
+            if "{" in match and "}" in match:
                 try:
-                    parsed = _parse_api_events(resp_data, league_name)
-                    results.extend(parsed)
-                except Exception as e:
-                    print(f"  [Betgr8] {league_name}: parse error: {e}")
-
-        # Fallback: try DOM extraction if API gave nothing
-        if not results:
-            try:
-                dom_events = await page.evaluate(JS_EXTRACT_EVENTS)
-                if dom_events:
-                    print(f"  [Betgr8] {league_name}: DOM found {len(dom_events)} events")
-                    for ev in dom_events:
-                        if len(ev.get("odds", [])) >= 3:
-                            match_odds = {"1X2": {
-                                "1": ev["odds"][0],
-                                "X": ev["odds"][1],
-                                "2": ev["odds"][2],
-                            }}
-                            results.append({
-                                "event_id": f"{ev['home']}-{ev['away']}",
-                                "event": f"{ev['home']} - {ev['away']}",
-                                "league": league_name,
-                                "odds": match_odds,
-                            })
-            except Exception as e:
-                print(f"  [Betgr8] {league_name}: DOM extraction error: {e}")
-
-        print(f"  [Betgr8] {league_name}: +{len(results)} matches")
-
+                    data = json.loads(match)
+                    if isinstance(data, (dict, list)):
+                        logger.debug(f"[Scraper] Found embedded JSON in script tag")
+                except:
+                    pass
     except Exception as e:
-        print(f"  [Betgr8] {league_name} error: {e}")
+        logger.debug(f"[Scraper] Could not capture page source: {e}")
 
+    logger.info(f"[Scraper] Processing {len(captured_responses)} API responses for {league_name}")
+
+    for url, api_data in captured_responses.items():
+        try:
+            events = _parse_api_events(api_data, league_name)
+
+            for event in events:
+                event_key = event["event"]
+                if event_key not in seen:
+                    seen.add(event_key)
+                    results.append(event)
+                    logger.info(f"[Scraper] + {event['event']} ({len(event['markets'])} markets)")
+
+                    if current_count + len(results) >= max_matches:
+                        break
+
+        except Exception as e:
+            logger.error(f"[Scraper] Error parsing API response from {url}: {e}")
+            continue
+
+    await page.close()
+    logger.info(f"[Scraper] {league_name}: extracted {len(results)} matches")
     return results
 
 
-async def scrape_betgr8(max_matches: int = 50) -> list:
-    """Scrape odds from Betgr8 Nigeria using Playwright + API interception."""
+async def scrape_betgr8(max_matches: int = 50) -> List[dict]:
     results = []
-    captured_responses = []
+    seen = set()
+
+    logger.info(f"Starting Betgr8 scraper (target: {max_matches} matches)")
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ],
         )
-        page = await browser.new_page()
-
-        # Block heavy resources
-        await page.route(
-            "**/*.{png,jpg,jpeg,gif,webp,woff,woff2,svg}",
-            lambda r: r.abort(),
-        )
-
-        # Intercept API responses from betgr8 API
-        async def handle_response(response):
-            url = response.url
-            if "ng.api.betgr8.com" in url or "push.betgr8.com" in url:
-                try:
-                    content_type = response.headers.get("content-type", "")
-                    if "json" in content_type:
-                        body = await response.json()
-                        captured_responses.append(body)
-                        print(f"  [Betgr8] Captured API response: {url[:80]}")
-                except Exception:
-                    pass
-
-        page.on("response", handle_response)
 
         for league_name, url in LEAGUE_URLS.items():
             if len(results) >= max_matches:
+                logger.info(f"Reached target of {max_matches} matches")
                 break
+
             try:
+                logger.info(f"{'=' * 60}")
+                logger.info(f"Scraping: {league_name}")
+                logger.info(f"{'=' * 60}")
+
                 league_matches = await _scrape_league(
-                    page, league_name, url, captured_responses
+                    browser, league_name, url, seen, max_matches, len(results)
                 )
                 results.extend(league_matches)
+
             except Exception as e:
-                print(f"  [Betgr8] {league_name} error: {e}")
+                logger.error(f"Fatal error scraping {league_name}: {e}", exc_info=True)
                 continue
 
         await browser.close()
 
-    print(f"  [Betgr8] Done \u2014 {len(results)} matches total")
+    logger.info(f"Scraping complete \u2014 {len(results)} matches total")
     return results
 
 
+def format_output(matches: List[dict]) -> List[dict]:
+    formatted = []
+    for match in matches:
+        formatted_match = {
+            "event": match.get("event", ""),
+            "league": match.get("league", ""),
+            "markets": match.get("markets", {}),
+        }
+        formatted.append(formatted_match)
+    return formatted
+
+
 if __name__ == "__main__":
-    data = asyncio.run(scrape_betgr8(max_matches=10))
-    print(json.dumps(data, indent=2))
+    data = asyncio.run(scrape_betgr8(max_matches=20))
+    output = format_output(data)
+    print(json.dumps(output, indent=2))
