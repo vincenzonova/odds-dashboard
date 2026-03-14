@@ -718,8 +718,8 @@ async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler()
     scheduler.add_job(do_refresh, "interval", minutes=REFRESH_INTERVAL_MINUTES)
     scheduler.start()
-    # Initial refresh
-    await do_refresh()
+    # Initial refresh in background (non-blocking so server starts immediately)
+    asyncio.create_task(do_refresh())
     yield
     # Shutdown
     if scheduler:
