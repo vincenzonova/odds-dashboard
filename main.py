@@ -43,6 +43,8 @@ from betslip_checker import (
 SECRET_KEY = "your-secret-key-change-in-production"
 MAX_MATCHES = 100
 SCRAPE_DAYS = 2  # Default: scrape next 2 days. Configurable via settings (1-10)
+MSPORT_MIN_DAYS = 7   # MSport needs wider window for coverage (SportyBet/Betgr8 don't filter by date)
+BET9JA_MIN_DAYS = 7   # Bet9ja API is fast, wider window improves merge coverage
 REFRESH_INTERVAL_MINUTES = 5
 DB_PATH = "odds_history.db"
 SCRAPER_TIMEOUTS = {
@@ -378,7 +380,60 @@ TEAM_ALIASES = {
     "fc lorient": "lorient",
     "fc metz": "metz",
     "toulouse fc": "toulouse",
-    "le havre ac": "le havre",
+    "le havre ac": "le havre",,
+    # Additional aliases for cross-bookmaker matching (Betgr8, MSport variations)
+    "nottingham forest": "nottingham",
+    "nott'm forest": "nottingham",
+    "nottm forest": "nottingham",
+    "nott forest": "nottingham",
+    "nott. forest": "nottingham",
+    "wolves": "wolverhampton",
+    "wolverhampton wanderers": "wolverhampton",
+    "wolverhampton": "wolverhampton",
+    "spurs": "tottenham",
+    "tottenham hotspur": "tottenham",
+    "tottenham": "tottenham",
+    "west ham": "west ham",
+    "west ham united": "west ham",
+    "west ham utd": "west ham",
+    "newcastle": "newcastle",
+    "newcastle united": "newcastle",
+    "newcastle utd": "newcastle",
+    "aston villa": "aston villa",
+    "crystal palace": "crystal palace",
+    "man utd": "manchester utd",
+    "man united": "manchester utd",
+    "manchester united": "manchester utd",
+    "man city": "manchester city",
+    "manchester city": "manchester city",
+    "inter": "inter",
+    "inter milan": "inter",
+    "internazionale": "inter",
+    "fc inter": "inter",
+    "fc internazionale": "inter",
+    "ac milan": "milan",
+    "milan": "milan",
+    "atletico madrid": "atletico madrid",
+    "atletico de madrid": "atletico madrid",
+    "atl. madrid": "atletico madrid",
+    "atl madrid": "atletico madrid",
+    "club atletico de madrid": "atletico madrid",
+    "rb leipzig": "leipzig",
+    "rasenballsport leipzig": "leipzig",
+    "rbl": "leipzig",
+    "paris saint-germain": "psg",
+    "paris saint germain": "psg",
+    "paris sg": "psg",
+    "psg": "psg",
+    "borussia dortmund": "dortmund",
+    "b. dortmund": "dortmund",
+    "bvb dortmund": "dortmund",
+    "bayern munich": "bayern",
+    "bayern munchen": "bayern",
+    "fc bayern munich": "bayern",
+    "fc bayern munchen": "bayern",
+    "fc bayern münchen": "bayern",
+
 }
 
 # Global cache with expanded structure for 5 bookmakers
@@ -473,12 +528,22 @@ def save_odds_to_db(rows: list):
 
 
 def _normalize_team(name: str) -> str:
-    """Normalize a team name for matching."""
+    """Normalize a team name for matching — aggressive normalization."""
+    import re as _re
     n = name.lower().strip()
-    # Remove common suffixes
-    for suffix in [" fc", " cf", " sc", " ssc", " bc", " afc", " calcio"]:
+    # Remove common prefixes and suffixes (fc, sc, afc, cf, etc.)
+    for suffix in [" fc", " cf", " sc", " ssc", " bc", " afc", " calcio", " 1907", " 1908", " 1899"]:
         if n.endswith(suffix):
             n = n[:-len(suffix)].strip()
+    for prefix in ["fc ", "sc ", "afc ", "ac ", "as ", "ss ", "us ", "uc ", "rc ", "cd ", "sd ", "ud ", "rcd "]:
+        if n.startswith(prefix):
+            n = n[len(prefix):].strip()
+    # Remove accents/diacritics approximation
+    accent_map = {"á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u", "ñ": "n", "ü": "u", "ö": "o", "ä": "a", "ç": "c", "è": "e", "ê": "e", "ë": "e", "à": "a", "â": "a", "î": "i", "ô": "o", "û": "u", "ï": "i"}
+    n = "".join(accent_map.get(c, c) for c in n)
+    # Remove dots, extra whitespace
+    n = _re.sub(r"\.+", " ", n).strip()
+    n = _re.sub(r"\s+", " ", n).strip()
     # Check aliases
     return TEAM_ALIASES.get(n, n)
 
@@ -487,34 +552,23 @@ def _team_sim(a: str, b: str) -> float:
     """Similarity between two normalized team names."""
     if a == b:
         return 1.0
-    # Containment check
+    # Containment check (either direction)
     if a in b or b in a:
+        return 0.88
+    # Word overlap - any shared significant word is a strong signal
+    wa = set(w for w in a.split() if len(w) > 2)
+    wb = set(w for w in b.split() if len(w) > 2)
+    if wa and wb:
+        overlap = len(wa & wb)
+        if overlap > 0:
+            score = overlap / max(len(wa), len(wb))
+            return max(score, 0.55)
+    # Check if first N chars match (e.g. "nottingham" vs "nottingham forest")
+    min_len = min(len(a), len(b))
+    if min_len >= 5 and a[:min_len] == b[:min_len]:
         return 0.85
-    # Word overlap
-    wa = set(a.split())
-    wb = set(b.split())
-    if not wa or not wb:
-        return 0.0
-    overlap = len(wa & wb) / max(len(wa), len(wb))
-    if overlap > 0:
-        return max(overlap, 0.3)  # boost any word overlap
     # Character-level similarity as fallback
     return SequenceMatcher(None, a, b).ratio()
-
-
-# Signs that need swapping when teams are in reversed order
-SIGN_SWAP_MAP = {
-    "1": "2",
-    "2": "1",
-    "1X": "X2",
-    "X2": "1X",
-    # These stay the same:
-    "X": "X",
-    "12": "12",
-    "Over": "Over",
-    "Under": "Under",
-}
-
 
 def fuzzy_match_event(event1: str, event2: str, threshold: float = 0.55) -> tuple:
     """
@@ -586,6 +640,7 @@ def merge_odds(raw_data: dict) -> list:
             # Try to find existing key via fuzzy match within same league
             matched_key = None
             is_reversed = False
+            matched_league = league
             for existing_key in league_index[league]:
                 existing_event = league_index[league][existing_key]["event"]
                 match_result = fuzzy_match_event(existing_event, event_name)
@@ -593,6 +648,23 @@ def merge_odds(raw_data: dict) -> list:
                     matched_key = existing_key
                     is_reversed = match_result[1]
                     break
+
+            # Cross-league fallback: if no match in same league, try all leagues
+            # This catches cases where bookmakers categorize the same event differently
+            if matched_key is None:
+                for other_league in league_index:
+                    if other_league == league:
+                        continue
+                    for existing_key in league_index[other_league]:
+                        existing_event = league_index[other_league][existing_key]["event"]
+                        match_result = fuzzy_match_event(existing_event, event_name, threshold=0.65)
+                        if match_result[0]:
+                            matched_key = existing_key
+                            matched_league = other_league
+                            is_reversed = match_result[1]
+                            break
+                    if matched_key is not None:
+                        break
 
             if matched_key is None:
                 matched_key = f"{league}|{event_name}"
@@ -602,27 +674,28 @@ def merge_odds(raw_data: dict) -> list:
                     "markets": {},
                     "start_time": ev.get("start_time", ""),
                 }
+                matched_league = league  # New entry in current league
             else:
-                print(f"  [Merge] Matched '{event_name}' ({bk_name}) -> '{league_index[league][matched_key]['event']}' (reversed={is_reversed})")
+                print(f"  [Merge] Matched '{event_name}' ({bk_name}) -> '{league_index[matched_league][matched_key]['event']}' league={matched_league} (reversed={is_reversed})")
 
             # Update start_time if this bookmaker has it and existing entry doesn't
-            if ev.get("start_time") and not league_index[league][matched_key].get("start_time"):
-                league_index[league][matched_key]["start_time"] = ev["start_time"]
+            if ev.get("start_time") and not league_index[matched_league][matched_key].get("start_time"):
+                league_index[matched_league][matched_key]["start_time"] = ev["start_time"]
 
             # Add this bookmaker's odds into the unified entry
             # SportyBet uses "odds" key, others use "markets"
             markets_data = ev.get("markets", ev.get("odds", {}))
             for market, signs in markets_data.items():
-                if market not in league_index[league][matched_key]["markets"]:
-                    league_index[league][matched_key]["markets"][market] = {}
+                if market not in league_index[matched_league][matched_key]["markets"]:
+                    league_index[matched_league][matched_key]["markets"][market] = {}
                 for sign, odds_str in signs.items():
                     # Swap sign if teams are in reversed order
                     actual_sign = SIGN_SWAP_MAP.get(sign, sign) if is_reversed else sign
-                    if actual_sign not in league_index[league][matched_key]["markets"][market]:
-                        league_index[league][matched_key]["markets"][market][actual_sign] = {}
+                    if actual_sign not in league_index[matched_league][matched_key]["markets"][market]:
+                        league_index[matched_league][matched_key]["markets"][market][actual_sign] = {}
                     try:
                         odds_val = float(str(odds_str).replace(",", "."))
-                        league_index[league][matched_key]["markets"][market][actual_sign][bk_name] = odds_val
+                        league_index[matched_league][matched_key]["markets"][market][actual_sign][bk_name] = odds_val
                     except (ValueError, AttributeError, TypeError):
                         pass
 
@@ -701,12 +774,12 @@ async def do_refresh():
         async def _run_playwright_scrapers():
             """Run Playwright scrapers one at a time to avoid OOM."""
             r1 = await safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES, days=SCRAPE_DAYS)
-            r2 = await safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES, days=SCRAPE_DAYS)
+            r2 = await safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, MSPORT_MIN_DAYS))
             r3 = await safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES, days=SCRAPE_DAYS)
             return [r1, r2, r3]
 
         bet9ja_result, playwright_results = await asyncio.gather(
-            safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
+            safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, BET9JA_MIN_DAYS)),
             _run_playwright_scrapers(),
         )
         results = [bet9ja_result] + playwright_results
