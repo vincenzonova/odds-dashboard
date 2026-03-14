@@ -430,6 +430,9 @@ function renderCustomComparison(data) {{
   const grid = document.getElementById('acca-grid');
   if (!grid) return;
   grid.innerHTML = '';
+  document.getElementById('acca-loading').style.display = 'none';
+  document.getElementById('acca-empty').style.display = 'none';
+  grid.style.display = '';
   const acca = {{
     size: data.size || 0,
     selections: data.selections || [],
@@ -451,6 +454,9 @@ async function loadAccumulators() {{
     const el = document.getElementById('acca-grid');
     if (!el) return;
     el.innerHTML = '';
+    document.getElementById('acca-loading').style.display = 'none';
+    document.getElementById('acca-empty').style.display = 'none';
+    el.style.display = '';
     if (!data.accumulators || data.accumulators.length === 0) {{
       el.innerHTML = '<p style="color:#aaa;text-align:center;padding:2rem;">No accumulators yet.</p>';
       return;
