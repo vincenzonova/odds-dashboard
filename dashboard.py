@@ -108,10 +108,11 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 
 /* -- Accumulator Cards ------------------------------ */
 .acca-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:16px}}
-.acca-card{{background:#1a1d27;border:1px solid #2d3144;border-radius:12px;overflow:hidden}}
+.acca-card{{background:#1a1d27;border:1px solid #2d3144;border-radius:12px;overflow:visible}}
 .acca-header{{padding:14px 18px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #2d3144}}
 .acca-size{{font-weight:700;font-size:1.05rem}} .acca-size span{{color:#6366f1}}
-.acca-body{{padding:14px 18px}}
+.acca-body{{padding:14px 18px;overflow-x:auto}}
+.acca-body table{{width:100%;min-width:500px}}
 .sel-list{{list-style:none;padding:0;margin:0 0 14px}}
 .sel-item{{padding:4px 0;font-size:.8rem;color:#cbd5e1;display:flex;justify-content:space-between}}
 .sel-sign{{color:#6366f1;font-weight:700;margin-left:8px}}
@@ -131,7 +132,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 /* -- Responsive ------------------------------------- */
 @media(max-width:1024px){{
   .acca-grid{{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}}
-  .bookmaker-grid{{grid-template-columns:repeat(2,1fr)}}
+  .bookmaker-grid{{grid-template-columns:repeat(4,1fr)}}
 }}
 @media(max-width:768px){{
   .header{{padding:12px 16px}} .tab-content{{padding:16px}} .search-box{{width:100%}}
