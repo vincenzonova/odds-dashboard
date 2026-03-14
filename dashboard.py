@@ -523,7 +523,7 @@ function startRefreshPolling() {{
   const statusEl = document.getElementById('status');
   const updatedEl = document.getElementById('updated');
   const startTime = Date.now();
-  const estTotal = 180; // estimated seconds
+  const estTotal = 360; // estimated seconds
   
   // Create progress bar if not exists
   let bar = document.getElementById('refresh-bar');
