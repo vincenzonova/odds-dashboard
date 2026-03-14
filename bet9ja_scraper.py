@@ -4,6 +4,7 @@ No browser automation needed — just plain HTTP requests.
 """
 import asyncio
 import aiohttp
+from datetime import datetime, timedelta
 
 BET9JA_API = "https://sports.bet9ja.com/desktop/feapi/PalimpsestAjax/GetEventsInGroupV2"
 
@@ -84,9 +85,10 @@ def _parse_event(event: dict, league_name: str) -> dict | None:
     return result
 
 
-async def scrape_bet9ja(max_matches: int = 50) -> list[dict]:
+async def scrape_bet9ja(max_matches: int = 50, days: int = 2) -> list[dict]:
     """Fetch odds from sports.bet9ja.com JSON API."""
     results = []
+    cutoff = datetime.now() + timedelta(days=days)  # Filter events within date range
 
     async with aiohttp.ClientSession(headers=HEADERS) as session:
         # First hit the main page to get cookies/session
@@ -131,6 +133,20 @@ async def scrape_bet9ja(max_matches: int = 50) -> list[dict]:
                         print(f"  [Bet9ja] DA={events[0].get('DA','?')} BP={events[0].get('BP','?')}")
                     for ev in events:
                         parsed = _parse_event(ev, league_name)
+                        # Filter by date range
+                        if parsed and parsed.get("start_time"):
+                            try:
+                                st = parsed["start_time"]
+                                for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+                                    try:
+                                        event_dt = datetime.strptime(st[:19], fmt)
+                                        if event_dt > cutoff:
+                                            parsed = None  # Beyond date range
+                                        break
+                                    except ValueError:
+                                        continue
+                            except Exception:
+                                pass  # Keep event if can't parse date
                         if parsed:
                             results.append(parsed)
                             added += 1
