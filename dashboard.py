@@ -464,9 +464,9 @@ async function loadAccumulators() {{
     data.accumulators.forEach((acca, idx) => {{
       const comp = {{
         title: `Acca #${{idx+1}} - ${{acca.size}} selections`,
-        bet9ja: acca.bet9ja ? acca.bet9ja.potential_win : 0,
-        sportybet: acca.sportybet ? acca.sportybet.potential_win : 0,
-        msport: acca.msport ? acca.msport.potential_win : 0,
+        bet9ja: acca.returns && acca.returns.bet9ja ? acca.returns.bet9ja.potential_win : 0,
+        sportybet: acca.returns && acca.returns.sportybet ? acca.returns.sportybet.potential_win : 0,
+        msport: acca.returns && acca.returns.msport ? acca.returns.msport.potential_win : 0,
       }};
       const card = createAccaCard(comp);
       grid.appendChild(card);
@@ -506,10 +506,57 @@ function createAccaCard(comp) {{
 
 /* -- Refresh ----------------------------------------- */
 function triggerRefresh() {{
-  fetch('/api/refresh', {{method: 'POST', headers: getAuthHeaders()}}).then(() => {{
-    document.getElementById('status').textContent = 'Refreshing\u2026';
-    setTimeout(() => location.reload(), 15000);
+  fetch('/api/refresh', {{method: 'POST', headers: getAuthHeaders()}}).then(r => {{
+    if (r.status === 429) {{
+      document.getElementById('status').textContent = 'Refresh already in progress...';
+      startRefreshPolling();
+      return;
+    }}
+    startRefreshPolling();
   }});
+}}
+
+let refreshPollTimer = null;
+function startRefreshPolling() {{
+  const statusEl = document.getElementById('status');
+  const updatedEl = document.getElementById('updated');
+  const startTime = Date.now();
+  const estTotal = 120; // estimated seconds
+  
+  // Create progress bar if not exists
+  let bar = document.getElementById('refresh-bar');
+  if (!bar) {{
+    bar = document.createElement('div');
+    bar.id = 'refresh-bar';
+    bar.style.cssText = 'position:fixed;top:0;left:0;height:3px;background:linear-gradient(90deg,#6366f1,#22c55e);z-index:9999;transition:width 1s linear;width:0%';
+    document.body.appendChild(bar);
+  }}
+  bar.style.width = '0%';
+  bar.style.display = 'block';
+  
+  if (refreshPollTimer) clearInterval(refreshPollTimer);
+  refreshPollTimer = setInterval(() => {{
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    const pct = Math.min(95, Math.round((elapsed / estTotal) * 100));
+    bar.style.width = pct + '%';
+    statusEl.textContent = 'Refreshing... ' + elapsed + 's / ~' + estTotal + 's (' + pct + '%)';
+    
+    fetch('/api/status', {{headers: getAuthHeaders()}})
+      .then(r => r.json())
+      .then(d => {{
+        if (!d.is_refreshing && d.total_rows > 0) {{
+          clearInterval(refreshPollTimer);
+          bar.style.width = '100%';
+          statusEl.textContent = 'Refresh complete! Reloading...';
+          setTimeout(() => location.reload(), 1000);
+        }}
+      }}).catch(() => {{}});
+  }}, 5000);
+}}
+
+/* -- Auto-start poll if currently refreshing -- */
+if (document.getElementById('status').textContent.includes('Refreshing')) {{
+  startRefreshPolling();
 }}
 
 /* -- Auto-Refresh ------------------------------------ */
