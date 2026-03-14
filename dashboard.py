@@ -427,78 +427,121 @@ async function generateCustomComparison() {{
 }}
 
 function renderCustomComparison(data) {{
-    const grid = document.getElementById('acca-grid');
-    grid.innerHTML = '';
-    grid.style.display = 'grid';
-    document.getElementById('acca-loading').style.display = 'none';
-    document.getElementById('acca-empty').style.display = 'none';
-    const comp = {{
-      title: data.size + ' Selections (Stake: ' + data.stake + ')',
-      bet9ja: data.bet9ja ? data.bet9ja.potential_win : 0,
-      sportybet: data.sportybet ? data.sportybet.potential_win : 0,
-      msport: data.msport ? data.msport.potential_win : 0,
-      betgr8: 0,
-    }};
-    const card = createAccaCard(comp);
-    grid.appendChild(card);
-  }}
+  const grid = document.getElementById('acca-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  const acca = {{
+    size: data.size || 0,
+    selections: data.selections || [],
+    returns: {{
+      bet9ja: data.bet9ja || {{}},
+      sportybet: data.sportybet || {{}},
+      msport: data.msport || {{}},
+      betgr8: data.betgr8 || {{}}
+    }}
+  }};
+  const card = createAccaCard(acca, 0);
+  grid.appendChild(card);
+}}
 
-  /* -- Accumulators ------------------------------------ */
-let accaLoaded = false;
 async function loadAccumulators() {{
-  if (accaLoaded) return;
   try {{
     const res = await fetch('/api/accumulators', {{headers: getAuthHeaders()}});
-    if (!res.ok) throw new Error('API error');
     const data = await res.json();
-    document.getElementById('acca-loading').style.display = 'none';
-
+    const el = document.getElementById('acca-grid');
+    if (!el) return;
+    el.innerHTML = '';
     if (!data.accumulators || data.accumulators.length === 0) {{
-      document.getElementById('acca-empty').style.display = 'block';
-      accaLoaded = true;
+      el.innerHTML = '<p style="color:#aaa;text-align:center;padding:2rem;">No accumulators yet.</p>';
       return;
     }}
-
-    const grid = document.getElementById('acca-grid');
-    grid.style.display = 'grid';
-    grid.innerHTML = '';
-
     data.accumulators.forEach((acca, idx) => {{
-      const comp = {{
-        title: `Acca #${{idx+1}} - ${{acca.size}} selections`,
-        bet9ja: acca.returns && acca.returns.bet9ja ? acca.returns.bet9ja.potential_win : 0,
-        sportybet: acca.returns && acca.returns.sportybet ? acca.returns.sportybet.potential_win : 0,
-        msport: acca.returns && acca.returns.msport ? acca.returns.msport.potential_win : 0,
-      }};
-      const card = createAccaCard(comp);
-      grid.appendChild(card);
+      const card = createAccaCard(acca, idx);
+      el.appendChild(card);
     }});
-    accaLoaded = true;
-  }} catch (e) {{
-    const el = document.getElementById('acca-loading');
-    el.textContent = 'Failed to load accumulators. Try refreshing.';
+  }} catch(e) {{
+    console.error('loadAccumulators error', e);
   }}
 }}
 
-function createAccaCard(comp) {{
+function createAccaCard(acca, idx) {{
   const card = document.createElement('div');
   card.className = 'acca-card';
+  card.style.cssText = 'margin-bottom:1.5rem;padding:1rem;border-radius:10px;background:#1a1a2e;border:1px solid #333;';
 
-  const odds = BOOKMAKERS.map(bm => comp[bm.key] || 0);
-  const maxOdds = Math.max(...odds);
+  const BOOKS = ['bet9ja','sportybet','msport','betgr8'];
+  const COLORS = {{'bet9ja':'#22c55e','sportybet':'#f59e0b','msport':'#ef4444','betgr8':'#8b5cf6'}};
+  const LABELS = {{'bet9ja':'BET9JA','sportybet':'SPORTYBET','msport':'MSPORT','betgr8':'BETGR8'}};
 
-  let html = `<div class="acca-header"><span class="acca-size">${{comp.title || 'Accumulator'}}</span></div>`;
-  html += '<div class="bookmaker-grid">';
+  const sels = acca.selections || [];
+  const returns = acca.returns || {{}};
+  const stake = 100;
 
-  BOOKMAKERS.forEach((bm, idx) => {{
-    const val = comp[bm.key] || 0;
-    const isBest = val === maxOdds && maxOdds > 0;
-    html += `
-      <div class="bm-box ${{bm.cls}} ${{isBest ? 'best' : ''}}">
-        <div class="bm-name">${{bm.name}}</div>
-        <div class="bm-odds">${{val ? val.toFixed(2) : '-'}}</div>
-      </div>
-    `;
+  let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;">';
+  html += '<h3 style="margin:0;color:#fff;font-size:1.1rem;">Acca #' + (idx+1) + ' - ' + sels.length + ' selections</h3>';
+  html += '<span style="color:#aaa;font-size:0.85rem;">Stake: \u20A6' + stake.toLocaleString() + '</span></div>';
+
+  html += '<table style="width:100%;border-collapse:collapse;margin-bottom:1rem;font-size:0.8rem;">';
+  html += '<thead><tr style="border-bottom:1px solid #444;">';
+  html += '<th style="text-align:left;padding:6px 4px;color:#aaa;">Event</th>';
+  html += '<th style="text-align:center;padding:6px 4px;color:#aaa;">Mkt</th>';
+  html += '<th style="text-align:center;padding:6px 4px;color:#aaa;">Sign</th>';
+  BOOKS.forEach(b => {{
+    html += '<th style="text-align:center;padding:6px 4px;color:' + COLORS[b] + ';">' + LABELS[b] + '</th>';
+  }});
+  html += '</tr></thead><tbody>';
+
+  sels.forEach(s => {{
+    html += '<tr style="border-bottom:1px solid #2a2a3e;">';
+    html += '<td style="padding:5px 4px;color:#ddd;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + (s.event||'') + '">' + (s.event||'-') + '</td>';
+    html += '<td style="text-align:center;padding:5px 4px;color:#aaa;">' + (s.market||'-') + '</td>';
+    html += '<td style="text-align:center;padding:5px 4px;color:#fff;font-weight:600;">' + (s.sign||'-') + '</td>';
+    BOOKS.forEach(b => {{
+      const val = s[b];
+      const ok = val && val !== '-' && val !== '';
+      html += '<td style="text-align:center;padding:5px 4px;color:' + (ok ? '#fff' : '#555') + ';">' + (ok ? parseFloat(val).toFixed(2) : '-') + '</td>';
+    }});
+    html += '</tr>';
+  }});
+  html += '</tbody></table>';
+
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0.8rem;">';
+
+  let bestWin = 0; let bestBook = "";
+  BOOKS.forEach(b => {{
+    const r = returns[b];
+    if (r && r.potential_win > bestWin) {{ bestWin = r.potential_win; bestBook = b; }}
+  }});
+
+  BOOKS.forEach(b => {{
+    const r = returns[b];
+    if (!r) return;
+    const pw = r.potential_win || 0;
+    const isBest = (b === bestBook && pw > 0);
+    const bdr = isBest ? '2px solid ' + COLORS[b] : '1px solid #333';
+    const glow = isBest ? 'box-shadow:0 0 12px ' + COLORS[b] + '40;' : '';
+
+    html += '<div style="background:#16162a;border-radius:8px;padding:0.8rem;border:' + bdr + ';' + glow + '">';
+    html += '<div style="color:' + COLORS[b] + ';font-weight:700;font-size:0.85rem;margin-bottom:0.5rem;">' + LABELS[b];
+    if (isBest) html += ' <span style="font-size:0.7rem;background:' + COLORS[b] + '22;padding:2px 6px;border-radius:4px;">BEST</span>';
+    html += '</div>';
+
+    if (pw > 0) {{
+      html += '<div style="color:#aaa;font-size:0.78rem;line-height:1.6;">';
+      html += 'Combined Odds: <span style="color:#fff;">' + (r.odds||0).toFixed(2) + '</span><br>';
+      html += 'Base Win: <span style="color:#fff;">\u20A6' + (r.base_win||0).toFixed(2) + '</span><br>';
+      if (r.bonus_percent > 0) {{
+        html += 'Bonus: <span style="color:' + COLORS[b] + ';">+' + r.bonus_percent + '% (\u20A6' + (r.bonus_amount||0).toFixed(2) + ')</span><br>';
+      }} else {{
+        html += 'Bonus: <span style="color:#555;">None</span><br>';
+      }}
+      html += '</div>';
+      html += '<div style="margin-top:0.4rem;font-size:1.2rem;font-weight:700;color:#fff;">\u20A6' + pw.toFixed(2) + '</div>';
+    }} else {{
+      html += '<div style="color:#555;font-size:0.85rem;padding:0.5rem 0;">Missing odds</div>';
+      html += '<div style="font-size:1.1rem;color:#555;">-</div>';
+    }}
+    html += '</div>';
   }});
 
   html += '</div>';
@@ -506,8 +549,7 @@ function createAccaCard(comp) {{
   return card;
 }}
 
-/* -- Refresh ----------------------------------------- */
-function triggerRefresh() {{
+/* ----------------------------------------------------------- */function triggerRefresh() {{
   fetch('/api/refresh', {{method: 'POST', headers: getAuthHeaders()}}).then(r => {{
     if (r.status === 429) {{
       document.getElementById('status').textContent = 'Refresh already in progress...';
