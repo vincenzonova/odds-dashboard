@@ -138,6 +138,20 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
   .acca-grid{{grid-template-columns:1fr}} .bookmaker-grid{{grid-template-columns:repeat(2,1fr)}}
   .filters{{gap:6px}} .selection-bar{{flex-wrap:wrap;top:auto}}
 }}
+/* -- Settings Modal -------------------------------- */
+.settings-btn{{background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.2rem;padding:6px 10px;border-radius:6px;transition:all .2s}}
+.settings-btn:hover{{color:#e2e8f0;background:#2d3144}}
+.modal-overlay{{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:1000;justify-content:center;align-items:center}}
+.modal-overlay.active{{display:flex}}
+.modal{{background:#1e2130;border:1px solid #2d3144;border-radius:12px;padding:24px;width:400px;max-width:90vw}}
+.modal h3{{margin:0 0 16px;color:#e2e8f0;font-size:1.1rem}}
+.modal label{{display:block;color:#94a3b8;margin-bottom:6px;font-size:.85rem}}
+.modal select{{width:100%;padding:8px 12px;border-radius:8px;border:1px solid #2d3144;background:#0f1117;color:#e2e8f0;font-size:.9rem;margin-bottom:16px}}
+.modal-actions{{display:flex;gap:8px;justify-content:flex-end}}
+.modal .btn-save{{padding:8px 20px;border-radius:8px;border:none;background:#6366f1;color:#fff;cursor:pointer;font-weight:600}}
+.modal .btn-save:hover{{background:#5558e6}}
+.modal .btn-cancel{{padding:8px 20px;border-radius:8px;border:1px solid #2d3144;background:transparent;color:#94a3b8;cursor:pointer}}
+.modal .btn-cancel:hover{{color:#e2e8f0}}
 </style>
 </head>
 <body>
@@ -149,6 +163,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
     <span class="status" id="status">{status}</span>
     <span class="status" id="updated">Updated: {last_updated}</span>
     <button class="btn btn-refresh" onclick="triggerRefresh()">&#8635; Refresh</button>
+    <button class="settings-btn" onclick="openSettings()" title="Settings">&#9881;</button>
     <a class="btn btn-logout" href="/logout">Logout</a>
   </div>
 </div>
@@ -213,7 +228,66 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
   </div>
 </div>
 
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settings-modal">
+  <div class="modal">
+    <h3>&#9881; Settings</h3>
+    <label for="scrape-days">Scrape Date Range (days)</label>
+    <select id="scrape-days">
+      <option value="1">1 day</option>
+      <option value="2" selected>2 days (default)</option>
+      <option value="3">3 days</option>
+      <option value="4">4 days</option>
+      <option value="5">5 days</option>
+      <option value="7">7 days</option>
+      <option value="10">10 days</option>
+    </select>
+    <p style="color:#64748b;font-size:.8rem;margin:0 0 16px">Controls how many days ahead the scrapers will fetch matches. A larger range means more matches but slower scrapes.</p>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeSettings()">Cancel</button>
+      <button class="btn-save" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
+// ── Settings ─────────────────────────────────────────
+function openSettings() {{
+  fetch('/api/settings', {{ headers: {{ 'Authorization': 'Bearer ' + localStorage.getItem('token') }} }})
+    .then(r => r.json())
+    .then(data => {{
+      document.getElementById('scrape-days').value = data.scrape_days || 2;
+      document.getElementById('settings-modal').classList.add('active');
+    }})
+    .catch(() => document.getElementById('settings-modal').classList.add('active'));
+}}
+function closeSettings() {{
+  document.getElementById('settings-modal').classList.remove('active');
+}}
+function saveSettings() {{
+  const days = document.getElementById('scrape-days').value;
+  fetch('/api/settings', {{
+    method: 'POST',
+    headers: {{ 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('token') }},
+    body: JSON.stringify({{ scrape_days: parseInt(days) }})
+  }})
+  .then(r => r.json())
+  .then(data => {{
+    closeSettings();
+    const statusEl = document.getElementById('scrape-status');
+    if (statusEl) statusEl.textContent = 'Scrape range: ' + days + ' days';
+    alert('Settings saved! Scrape range set to ' + days + ' days. Changes take effect on next refresh.');
+  }})
+  .catch(e => alert('Failed to save: ' + e.message));
+}}
+// Close modal on overlay click
+document.addEventListener('DOMContentLoaded', function() {{
+  const overlay = document.getElementById('settings-modal');
+  if (overlay) overlay.addEventListener('click', function(e) {{
+    if (e.target === overlay) closeSettings();
+  }});
+}});
+
 /* -- Data -------------------------------------------- */
 const RAW_ROWS = {rows_json};
 let filteredRows = [...RAW_ROWS];
