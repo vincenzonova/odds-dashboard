@@ -40,8 +40,7 @@ LEAGUE_URLS = {
 
 # Target API patterns to intercept (skip modals, latest-winners, etc)
 RELEVANT_API_PATTERNS = [
-    "sb/pal/sports",
-    "sportsbook",
+    "ng.api.betgr8.com",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -317,6 +316,12 @@ def _extract_odds_from_list(odds_list: list) -> dict:
 
 async def _should_intercept_request(url: str) -> bool:
     url_lower = url.lower()
+    # Skip JS, CSS, image files
+    if any(url_lower.endswith(ext) for ext in ['.js', '.css', '.png', '.jpg', '.svg', '.woff', '.woff2']):
+        return False
+    # Also skip if has ?v_= param and ends with js pattern
+    if '/js/' in url_lower or '/css/' in url_lower:
+        return False
     for pattern in RELEVANT_API_PATTERNS:
         if pattern in url_lower:
             return True
@@ -363,7 +368,7 @@ async def _scrape_league(browser, league_name: str, url: str, seen: set,
     logger.info(f"[Scraper] Loading {league_name} from {url}")
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(10000)
     except Exception as e:
         logger.error(f"[Scraper] Failed to load {league_name}: {e}")
         await page.close()
