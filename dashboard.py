@@ -187,6 +187,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
         <tr>
           <th class="checkbox-cell"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>
           <th data-col="league">League <span class="sort-arrow">&#9650;</span></th>
+          <th data-col="start_time">Date/Time <span class="sort-arrow">&#9650;</span></th>
           <th data-col="event">Event <span class="sort-arrow">&#9650;</span></th>
           <th data-col="market">Market <span class="sort-arrow">&#9650;</span></th>
           <th data-col="sign">Sign <span class="sort-arrow">&#9650;</span></th>
@@ -359,6 +360,7 @@ function renderTable() {{
     html += `<tr>
       <td class="checkbox-cell"><input type="checkbox" class="row-cb" data-idx="${{idx}}" onchange="updateSelection()"></td>
       <td class="league-cell">${{r.league}}</td>
+            <td style="color:#94a3b8;font-size:.78rem">${{r.start_time || ''}}</td>
       <td class="event-cell">${{r.event}}</td>
       <td class="market-cell">${{r.market}}</td>
       <td class="sign-cell">${{r.sign}}</td>
@@ -521,7 +523,7 @@ function startRefreshPolling() {{
   const statusEl = document.getElementById('status');
   const updatedEl = document.getElementById('updated');
   const startTime = Date.now();
-  const estTotal = 120; // estimated seconds
+  const estTotal = 180; // estimated seconds
   
   // Create progress bar if not exists
   let bar = document.getElementById('refresh-bar');
