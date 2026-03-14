@@ -229,6 +229,12 @@ const BOOKMAKERS = [
     {{key: 'betgr8', name: 'Betgr8', cls: 'betgr8'}},
 ];
 
+/* -- Auth Helper ---- */
+function getAuthHeaders() {{
+  const token = localStorage.getItem('token');
+  return {'Authorization': 'Bearer ' + (token || '')};
+}}
+
 /* -- Tab Switching ----------------------------------- */
 document.querySelectorAll('.tab-btn').forEach(btn => {{
   btn.addEventListener('click', () => {{
@@ -403,8 +409,8 @@ async function generateCustomComparison() {{
   try {{
     const res = await fetch('/api/custom-comparison', {{
       method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{rows: selectedRows}})
+      headers: Object.assign({{'Content-Type': 'application/json'}}, getAuthHeaders()),
+      body: JSON.stringify({{selections: selectedRows, stake: 100}})
     }});
 
     if (!res.ok) throw new Error('API error');
@@ -419,30 +425,28 @@ async function generateCustomComparison() {{
 }}
 
 function renderCustomComparison(data) {{
-  const grid = document.getElementById('acca-grid');
-  grid.innerHTML = '';
-  grid.style.display = 'grid';
-  document.getElementById('acca-loading').style.display = 'none';
-  document.getElementById('acca-empty').style.display = 'none';
-
-  if (!data.comparisons || data.comparisons.length === 0) {{
-    document.getElementById('acca-empty').style.display = 'block';
-    grid.style.display = 'none';
-    return;
-  }}
-
-  data.comparisons.forEach(comp => {{
+    const grid = document.getElementById('acca-grid');
+    grid.innerHTML = '';
+    grid.style.display = 'grid';
+    document.getElementById('acca-loading').style.display = 'none';
+    document.getElementById('acca-empty').style.display = 'none';
+    const comp = {{
+      title: data.size + ' Selections (Stake: ' + data.stake + ')',
+      bet9ja: data.bet9ja ? data.bet9ja.potential_win : 0,
+      sportybet: data.sportybet ? data.sportybet.potential_win : 0,
+      msport: data.msport ? data.msport.potential_win : 0,
+      betgr8: 0,
+    }};
     const card = createAccaCard(comp);
     grid.appendChild(card);
-  }});
-}}
+  }}
 
-/* -- Accumulators ------------------------------------ */
+  /* -- Accumulators ------------------------------------ */
 let accaLoaded = false;
 async function loadAccumulators() {{
   if (accaLoaded) return;
   try {{
-    const res = await fetch('/api/accumulators');
+    const res = await fetch('/api/accumulators', {{headers: getAuthHeaders()}});
     if (!res.ok) throw new Error('API error');
     const data = await res.json();
     document.getElementById('acca-loading').style.display = 'none';
@@ -502,7 +506,7 @@ function createAccaCard(comp) {{
 
 /* -- Refresh ----------------------------------------- */
 function triggerRefresh() {{
-  fetch('/api/refresh').then(() => {{
+  fetch('/api/refresh', {{method: 'POST', headers: getAuthHeaders()}}).then(() => {{
     document.getElementById('status').textContent = 'Refreshing\u2026';
     setTimeout(() => location.reload(), 15000);
   }});
