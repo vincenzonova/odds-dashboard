@@ -302,7 +302,7 @@ TEAM_ALIASES = {
 cache = {
     "rows": [],
     "last_updated": None,
-    "status": "Initialisingâ¦",
+    "status": "Initialising...",
     "is_refreshing": False,
     "accumulators": [],
     "raw_bet9ja": [],
@@ -375,11 +375,11 @@ def save_odds_to_db(rows: list):
             row.get("event", ""),
             row.get("market", ""),
             row.get("sign", ""),
-            row.get("bet9ja", "â"),
-            row.get("sportybet", "â"),
-            row.get("betking", "â"),
-            row.get("msport", "â"),
-            row.get("betano", "â"),
+            row.get("bet9ja", "-"),
+            row.get("sportybet", "-"),
+            row.get("betking", "-"),
+            row.get("msport", "-"),
+            row.get("betano", "-"),
             row.get("diff", 0.0),
         ))
     conn.commit()
@@ -516,7 +516,7 @@ def merge_odds(raw_data: dict) -> list:
                     "markets": {},
                 }
             else:
-                print(f"  [Merge] Matched '{event_name}' ({bk_name}) â '{league_index[league][matched_key]['event']}' (reversed={is_reversed})")
+                print(f"  [Merge] Matched '{event_name}' ({bk_name}) -> '{league_index[league][matched_key]['event']}' (reversed={is_reversed})")
 
             # Add this bookmaker's odds into the unified entry
             # SportyBet uses "odds" key, others use "markets"
@@ -555,7 +555,7 @@ def merge_odds(raw_data: dict) -> list:
                             row[bk_name] = f"{bk_odds[bk_name]:.2f}"
                             all_odds_values.append(bk_odds[bk_name])
                         else:
-                            row[bk_name] = "â"
+                            row[bk_name] = "-"
 
                     # Calculate difference
                     if len(all_odds_values) >= 2:
@@ -600,7 +600,7 @@ async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_M
 
 async def do_refresh():
     """Refresh odds from all 5 bookmakers concurrently."""
-    cache["status"] = "Refreshingâ¦"
+    cache["status"] = "Refreshing..."
     cache["is_refreshing"] = True
     try:
         # Scrape all bookmakers in parallel with global timeout
