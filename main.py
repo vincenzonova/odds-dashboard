@@ -7,7 +7,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
-from functools import wrap
+from functools import wraps
 from difflib import SequenceMatcher
 from fastapi import FastAPI, Request, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, HTMLResponse
