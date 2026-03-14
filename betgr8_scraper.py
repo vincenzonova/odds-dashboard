@@ -390,7 +390,7 @@ async def _scrape_league(page, league_name: str, base_url: str, max_matches: int
     return results
 
 
-async def scrape_betgr8(max_matches: int = 100) -> List[dict]:
+async def scrape_betgr8(max_matches: int = 100, days: int = 2) -> List[dict]:
     """Main entry point: launch browser, scrape all leagues, return matches."""
     all_matches = []
     seen = set()
