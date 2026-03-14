@@ -119,9 +119,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 .bm-box{{background:#0f1117;border-radius:8px;padding:12px;border:2px solid #2d3144;text-align:center;transition:all .2s}}
 .bm-box.bet9ja{{border-color:#22c55e}} .bm-box.bet9ja.best{{box-shadow:0 0 12px rgba(34,197,94,.3)}}
 .bm-box.sportybet{{border-color:#f59e0b}} .bm-box.sportybet.best{{box-shadow:0 0 12px rgba(245,158,11,.3)}}
-.bm-box.betking{{border-color:#3b82f6}} .bm-box.betking.best{{box-shadow:0 0 12px rgba(59,130,246,.3)}}
 .bm-box.msport{{border-color:#ef4444}} .bm-box.msport.best{{box-shadow:0 0 12px rgba(239,68,68,.3)}}
-.bm-box.betano{{border-color:#8b5cf6}} .bm-box.betano.best{{box-shadow:0 0 12px rgba(139,92,246,.3)}}
 .bm-box.best{{font-weight:700;background:rgba(34,197,94,.08)}}
 .bm-name{{font-weight:700;font-size:.75rem;text-transform:uppercase;margin-bottom:6px;opacity:.9}}
 .bm-odds{{font-size:1.1rem;font-weight:700;font-variant-numeric:tabular-nums}}
@@ -192,9 +190,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
           <th data-col="sign">Sign <span class="sort-arrow">&#9650;</span></th>
           <th data-col="bet9ja">Bet9ja <span class="sort-arrow">&#9650;</span></th>
           <th data-col="sportybet">SportyBet <span class="sort-arrow">&#9650;</span></th>
-          <th data-col="betking">BetKing <span class="sort-arrow">&#9650;</span></th>
           <th data-col="msport">MSport <span class="sort-arrow">&#9650;</span></th>
-          <th data-col="betano">Betano <span class="sort-arrow">&#9650;</span></th>
           <th data-col="diff">Best Diff <span class="sort-arrow">&#9650;</span></th>
         </tr>
       </thead>
@@ -226,9 +222,7 @@ let activeMarkets = new Set();
 const BOOKMAKERS = [
   {{key: 'bet9ja', name: 'Bet9ja', cls: 'bet9ja'}},
   {{key: 'sportybet', name: 'SportyBet', cls: 'sportybet'}},
-  {{key: 'betking', name: 'BetKing', cls: 'betking'}},
   {{key: 'msport', name: 'MSport', cls: 'msport'}},
-  {{key: 'betano', name: 'Betano', cls: 'betano'}}
 ];
 
 /* -- Tab Switching ----------------------------------- */
@@ -311,7 +305,7 @@ function doSort() {{
       vb = vb ?? (sortAsc ? 9999 : -9999);
       return sortAsc ? va - vb : vb - va;
     }}
-    if (['bet9ja', 'sportybet', 'betking', 'msport', 'betano'].includes(sortCol)) {{
+    if (['bet9ja', 'sportybet', 'msport'].includes(sortCol)) {{
       va = va === '-' ? null : parseFloat(va);
       vb = vb === '-' ? null : parseFloat(vb);
       if (va === null && vb === null) return 0;
@@ -464,9 +458,7 @@ async function loadAccumulators() {{
         title: `Acca #${{idx+1}} - ${{acca.size}} selections`,
         bet9ja: acca.bet9ja ? acca.bet9ja.potential_win : 0,
         sportybet: acca.sportybet ? acca.sportybet.potential_win : 0,
-        betking: acca.betking ? acca.betking.potential_win : 0,
         msport: acca.msport ? acca.msport.potential_win : 0,
-        betano: acca.betano ? acca.betano.potential_win : 0
       }};
       const card = createAccaCard(comp);
       grid.appendChild(card);
