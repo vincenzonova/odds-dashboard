@@ -7,7 +7,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
-from functools import wraps
+from functools import wrap
 from difflib import SequenceMatcher
 from fastapi import FastAPI, Request, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, HTMLResponse
@@ -86,6 +86,11 @@ TEAM_ALIASES = {
     "nott forest": "nottingham",
     "nottm forest": "nottingham",
     "nott. forest": "nottingham",
+    "leeds united": "leeds utd",
+    "leeds": "leeds utd",
+    "sunderland afc": "sunderland",
+    "afc sunderland": "sunderland",
+    "burnley fc": "burnley",
     "everton fc": "everton",
     "chelsea fc": "chelsea",
     "liverpool fc": "liverpool",
@@ -609,17 +614,18 @@ async def do_refresh():
     cache["is_refreshing"] = True
     try:
         # Scrape all bookmakers in parallel with global timeout
-        results = await asyncio.wait_for(
-            asyncio.gather(
-                safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES),
-                safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES),
-                # safe_scrape("BetKing", scrape_betking, max_matches=MAX_MATCHES),  # PAUSED
-                safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES),
-            safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES),
-                # safe_scrape("Betano", scrape_betano, max_matches=MAX_MATCHES),  # PAUSED
-            ),
-            timeout=GATHER_TIMEOUT_SECONDS
-        )
+        # Run Bet9ja (API) in parallel with Playwright scrapers run sequentially
+        # to avoid memory pressure from 3+ concurrent headless browsers
+        async def _run_playwright_scrapers():
+            r1 = await safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES)
+            r2 = await safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES)
+            r3 = await safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES)
+            return [r1, r2, r3]
+
+        bet9ja_task = asyncio.create_task(safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES))
+        pw_results = await _run_playwright_scrapers()
+        bet9ja_result = await bet9ja_task
+        results = [bet9ja_result] + pw_results
 
         # Store raw data
         raw_data = {}
