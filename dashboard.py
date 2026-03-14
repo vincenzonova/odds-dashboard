@@ -19,7 +19,7 @@ def build_dashboard_html(cache: dict) -> str:
     status = cache.get("status", "Live")
 
     # Convert rows to JSON for JavaScript
-    rows_json = json.dumps(rows)
+    rows_json = json.dumps(rows, ensure_ascii=False)
 
     # Extract unique leagues and markets
     leagues = sorted(set(row.get("league", "Unknown") for row in rows if row.get("league")))
