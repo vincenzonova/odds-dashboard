@@ -59,6 +59,9 @@ SCRAPER_TIMEOUTS = {
 DEFAULT_SCRAPER_TIMEOUT = 120
 GATHER_TIMEOUT_SECONDS = 600
 
+# Sign swap map for reversed team order (home/away swapped)
+SIGN_SWAP_MAP = {"1": "2", "2": "1", "X": "X", "1X": "X2", "X2": "1X", "12": "12", "Over": "Over", "Under": "Under"}
+
 # Comprehensive team name aliases for major European leagues
 TEAM_ALIASES = {
     # English Premier League & Championship
