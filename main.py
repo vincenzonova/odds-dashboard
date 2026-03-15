@@ -380,7 +380,7 @@ TEAM_ALIASES = {
     "fc lorient": "lorient",
     "fc metz": "metz",
     "toulouse fc": "toulouse",
-    "le havre ac": "le havre",,
+    "le havre ac": "le havre",
     # Additional aliases for cross-bookmaker matching (Betgr8, MSport variations)
     "nottingham forest": "nottingham",
     "nott'm forest": "nottingham",
