@@ -496,53 +496,62 @@ function updateSelectionBar() {{
   }}
 }}
 
-/* -- Custom Comparison ------------------------------- */
-async function generateCustomComparison() {{
-  if (selectedIndices.size === 0) {{
-    alert('Please select at least one row');
-    return;
-  }}
-
-  const selectedRows = Array.from(selectedIndices).map(idx => filteredRows[idx]);
-
-  try {{
-    const res = await fetch('/api/custom-comparison', {{
-      method: 'POST',
-      headers: Object.assign({{'Content-Type': 'application/json'}}, getAuthHeaders()),
-        body: JSON.stringify({{selections: selectedRows, stake: 100, bookmakers: Array.from(document.querySelectorAll('.bm-check:checked')).map(c => c.value)}})
-    }});
-
-    if (!res.ok) throw new Error('API error');
-    const data = await res.json();
-
-    renderCustomComparison(data);
-    document.querySelectorAll('.tab-btn')[1].click();
-  }} catch (e) {{
-    console.error('Error:', e);
-    alert('Failed to generate comparison');
-  }}
-}}
-
-function renderCustomComparison(data) {{
-  const grid = document.getElementById('acca-grid');
-  if (!grid) return;
-  grid.innerHTML = '';
-  document.getElementById('acca-loading').style.display = 'none';
-  document.getElementById('acca-empty').style.display = 'none';
-  grid.style.display = '';
-  const acca = {{
-    size: data.size || 0,
-    selections: data.selections || [],
-    returns: {{
-      bet9ja: data.bet9ja || {{}},
-      sportybet: data.sportybet || {{}},
-      msport: data.msport || {{}},
-      betgr8: data.betgr8 || {{}}
+/* -- Custom Comparison ----------------------------------- */
+  async function generateCustomComparison() {{
+    if (selectedIndices.size === 0) {{
+      alert('Please select at least one row');
+      return;
     }}
-  }};
-  const card = createAccaCard(acca, 0);
-  grid.appendChild(card);
-}}
+
+    const selectedRows = Array.from(selectedIndices).map(idx => filteredRows[idx]);
+    const bookmakers = Array.from(document.querySelectorAll('.bm-check:checked')).map(c => c.value);
+
+    /* Show loading & switch to Bet Comparison tab */
+    document.getElementById('acca-loading').style.display = '';
+    document.getElementById('acca-empty').style.display = 'none';
+    document.getElementById('acca-grid').style.display = 'none';
+    document.querySelectorAll('.tab-btn')[1].click();
+
+    try {{
+      const res = await fetch('/api/live-comparison', {{
+        method: 'POST',
+        headers: Object.assign({{'Content-Type': 'application/json'}}, getAuthHeaders()),
+        body: JSON.stringify({{selections: selectedRows, stake: 100, bookmakers: bookmakers}})
+      }});
+
+      if (!res.ok) throw new Error('API error');
+      const data = await res.json();
+
+      renderCustomComparison(data);
+    }} catch (e) {{
+      console.error('Error:', e);
+      document.getElementById('acca-loading').style.display = 'none';
+      document.getElementById('acca-empty').style.display = '';
+      alert('Failed to generate comparison. Live scraping may have timed out.');
+    }}
+  }}
+
+  function renderCustomComparison(data) {{
+    const grid = document.getElementById('acca-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    document.getElementById('acca-loading').style.display = 'none';
+    document.getElementById('acca-empty').style.display = 'none';
+    grid.style.display = '';
+    const src = data.results || data;
+    const acca = {{
+      size: data.size || 0,
+      selections: data.selections || [],
+      returns: {{
+        bet9ja: src.bet9ja || {{}},
+        sportybet: src.sportybet || {{}},
+        msport: src.msport || {{}},
+        betgr8: src.betgr8 || {{}}
+      }}
+    }};
+    const card = createAccaCard(acca, 0);
+    grid.appendChild(card);
+  }}
 
 async function loadAccumulators() {{
   try {{
