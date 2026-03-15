@@ -561,7 +561,7 @@ class TestAPIEndpoints:
         from main import app
         client = TestClient(app)
         # Login first
-        login_resp = client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        login_resp = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
         assert login_resp.status_code == 200
         token = login_resp.json().get("token", "")
         # Call custom-comparison with auth
