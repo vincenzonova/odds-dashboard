@@ -529,3 +529,48 @@ class TestImports:
     def test_import_betslip_checker(self):
         import betslip_checker
         assert hasattr(betslip_checker, "check_all_accumulators")
+
+
+# ================================================================
+# 10. API ENDPOINT TESTS (auth, comparison endpoints)
+# ================================================================
+
+class TestAPIEndpoints:
+    """Test API endpoints require authentication and accept correct payloads."""
+
+    def test_custom_comparison_requires_auth(self):
+        from fastapi.testclient import TestClient
+        from main import app
+        client = TestClient(app)
+        resp = client.post("/api/custom-comparison", json={
+            "selections": [], "stake": 100, "bookmakers": ["bet9ja"]
+        })
+        assert resp.status_code in (401, 403), f"Expected 401/403, got {resp.status_code}"
+
+    def test_live_comparison_requires_auth(self):
+        from fastapi.testclient import TestClient
+        from main import app
+        client = TestClient(app)
+        resp = client.post("/api/live-comparison", json={
+            "selections": [], "stake": 100, "bookmakers": ["bet9ja"]
+        })
+        assert resp.status_code in (401, 403), f"Expected 401/403, got {resp.status_code}"
+
+    def test_custom_comparison_with_auth(self):
+        from fastapi.testclient import TestClient
+        from main import app
+        client = TestClient(app)
+        # Login first
+        login_resp = client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        assert login_resp.status_code == 200
+        token = login_resp.json().get("token", "")
+        # Call custom-comparison with auth
+        resp = client.post("/api/custom-comparison",
+            json={"selections": [], "stake": 100, "bookmakers": ["bet9ja"]},
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        # Should succeed (200) even with empty selections
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
+        data = resp.json()
+        assert "size" in data
+        assert "selections" in data
