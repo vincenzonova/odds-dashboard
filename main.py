@@ -943,22 +943,48 @@ async def logout(current_user: str = Depends(get_current_user)):
 # ODDS ENDPOINTS
 # ============================================================================
 
+def _filter_rows_by_date(rows, days):
+    """Filter merged rows to only include events within 'days' from now."""
+    cutoff = datetime.now() + timedelta(days=days)
+    filtered = []
+    for row in rows:
+        st = row.get("start_time", "")
+        if not st:
+            filtered.append(row)
+            continue
+        try:
+            event_dt = None
+            for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%d/%m/%Y %H:%M", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%SZ"):
+                try:
+                    event_dt = datetime.strptime(str(st)[:19], fmt[:min(len(fmt), 19)])
+                    break
+                except ValueError:
+                    continue
+            if event_dt is None or event_dt <= cutoff:
+                filtered.append(row)
+        except Exception:
+            filtered.append(row)
+    return filtered
+
+
 @app.get("/api/odds")
 async def get_odds(current_user: str = Depends(get_current_user)):
-    """Get all merged odds from 5 bookmakers."""
+    """Get all merged odds from 5 bookmakers, filtered by SCRAPE_DAYS setting."""
+    filtered = _filter_rows_by_date(cache["rows"], SCRAPE_DAYS)
     return JSONResponse({
-        "rows": cache["rows"],
+        "rows": filtered,
         "last_updated": cache["last_updated"],
         "status": cache["status"],
         "bookmakers": ["Bet9ja", "SportyBet", "BetKing", "MSport", "Betano"],
-        "total_events": len(cache["rows"]),
+        "total_events": len(filtered),
     })
 
 
 @app.get("/api/odds/by-league/{league}")
 async def get_odds_by_league(league: str, current_user: str = Depends(get_current_user)):
     """Get odds filtered by league."""
-    filtered = [row for row in cache["rows"] if row.get("league", "").lower() == league.lower()]
+    all_rows = _filter_rows_by_date(cache["rows"], SCRAPE_DAYS)
+    filtered = [row for row in all_rows if row.get("league", "").lower() == league.lower()]
     return JSONResponse({
         "league": league,
         "rows": filtered,
