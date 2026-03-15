@@ -552,7 +552,22 @@ async def api_live_comparison(
                 )
                 if resp.status_code == 200:
                     betslip_data = resp.json()
-                    # Ensure selections are in the response for frontend
+                    betslip_results = betslip_data.get("results", betslip_data)
+                    # Supplement failed bookmakers with formula fallback
+                    fallback_calcs = {
+                        "bet9ja": lambda: calculate_bet9ja_returns(selections, stake),
+                        "sportybet": lambda: _sportybet_formula_fallback(selections, stake),
+                        "msport": lambda: calculate_msport_returns(selections, stake),
+                        "betgr8": lambda: calculate_betgr8_returns(selections, stake),
+                    }
+                    for bm in bookmakers:
+                        bm_result = betslip_results.get(bm, {})
+                        if not bm_result.get("potential_win"):
+                            if bm in fallback_calcs:
+                                betslip_results[bm] = fallback_calcs[bm]()
+                                betslip_results[bm]["source"] = "formula_fallback"
+                    if "results" in betslip_data:
+                        betslip_data["results"] = betslip_results
                     if "selections" not in betslip_data:
                         betslip_data["selections"] = selections
                     betslip_data["size"] = len(selections)
