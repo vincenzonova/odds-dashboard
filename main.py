@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from functools import wraps
 from difflib import SequenceMatcher
-from fastapi import FastAPI, Request, Depends, HTTPException, status
+from fastapi import FastAPI, Requst, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +27,7 @@ from betgr8_scraper import scrape_betgr8
 
 # Import dashboard HTML builder
 from dashboard import build_dashboard_html
+from debug_routes import router as debug_router
 
 # Import betslip checker with all return calculators
 from betslip_checker import (
@@ -902,6 +903,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(debug_router)
 
 # ============================================================================
 # AUTHENTICATION ENDPOINTS
