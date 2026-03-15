@@ -65,6 +65,7 @@ def _parse_event(event: dict, league_name: str) -> dict | None:
         "event": name,
         "league": league_name,
         "odds": odds,
+        "start_time": event.get("STARTDATE", ""),
     }
     # Extract start time - Bet9ja API uses DA for date string
     start_time = event.get("DA", event.get("DT", ""))
