@@ -95,6 +95,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 .checkbox-cell{{text-align:center;width:40px}}
 .checkbox-cell input{{cursor:pointer;accent-color:#6366f1}}
 .league-cell{{color:#64748b;font-size:.75rem}}
+.datetime-cell{{color:#94a3b8;font-size:.75rem;white-space:nowrap}}
 .event-cell{{font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis}}
 .market-cell{{color:#94a3b8}}
 .sign-cell{{font-weight:700;color:#e2e8f0}}
@@ -311,6 +312,20 @@ function getAuthHeaders() {{
   return {{'Authorization': 'Bearer ' + (token || '')}};
 }}
 
+/* -- Date/Time Formatter ----------------------------- */
+function formatDateTime(st) {{
+  if (!st) return '\u2014';
+  try {{
+    const d = new Date(st.replace(' ', 'T'));
+    if (isNaN(d.getTime())) return st;
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${{dd}}/${{mm}} ${{hh}}:${{min}}`;
+  }} catch(e) {{ return st; }}
+}}
+
 /* -- Tab Switching ----------------------------------- */
 document.querySelectorAll('.tab-btn').forEach(btn => {{
   btn.addEventListener('click', () => {{
@@ -435,7 +450,7 @@ function renderTable() {{
     html += `<tr>
       <td class="checkbox-cell"><input type="checkbox" class="row-cb" data-idx="${{idx}}" onchange="updateSelection()"></td>
       <td class="league-cell">${{r.league}}</td>
-            <td style="color:#94a3b8;font-size:.78rem">${{r.start_time || ''}}</td>
+            <td class="datetime-cell">${{formatDateTime(r.start_time)}}</td>
       <td class="event-cell">${{r.event}}</td>
       <td class="market-cell">${{r.market}}</td>
       <td class="sign-cell">${{r.sign}}</td>
