@@ -38,6 +38,33 @@ Real-time odds comparison dashboard that scrapes betting odds from 4 Nigerian bo
                                     [/api/odds JSON endpoint]
 ```
 
+## Betslip Service (Separate Railway Instance)
+
+The betslip service runs as a separate Railway deployment to handle live accumulator/betslip checking via Playwright browser automation.
+
+- **Service name**: innovative-tranquility
+- **URL**: https://innovative-tranquility-production.up.railway.app
+- **Region**: asia-southeast1-eqsg3a
+- **File**: betslip_service.py (FastAPI wrapper around betslip_scraper.py)
+- **Auth**: API secret via BETSLIP_API_SECRET env var
+- **Health check**: GET / returns {"status":"ok","service":"betslip"}
+
+### Live Check Flow
+
+1. User selects matches on dashboard and clicks "Live Check"
+2. Dashboard JS calls `/api/live-comparison` on main service
+3. Main service forwards request to betslip service via HTTP POST
+4. Betslip service uses Playwright to check actual bookmaker betslips
+5. If betslip service fails or is unavailable, main service falls back to formula-based calculation
+6. Response includes: results per bookmaker, selections list, stake, and size
+
+### Environment Variables (Main Service)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| BETSLIP_SERVICE_URL | "" | Full URL of betslip service (e.g., https://innovative-tranquility-production.up.railway.app) |
+| BETSLIP_API_SECRET | "betslip-secret-key" | Shared secret for authenticating requests to betslip service |
+
 ## Key Design Decisions
 
 ### Scraper Execution Model
@@ -79,6 +106,8 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 | betking_scraper.py | 14KB | BetKing scraper (PAUSED - geo-blocked) |
 | betano_scraper.py | 14KB | Betano scraper (PAUSED) |
 | betslip_checker.py | 26KB | Betslip/accumulator checking logic |
+| betslip_scraper.py | - | Playwright-based betslip scraping for live checks |
+| betslip_service.py | - | Separate FastAPI microservice wrapping betslip_scraper (deployed as own Railway instance) |
 | debug_routes.py | 2KB | Debug endpoints (connectivity check) |
 | test_main.py | 42KB | Unit tests (has duplicate sections L532-1062) |
 | Dockerfile | 0.4KB | Docker build with Playwright |
@@ -110,6 +139,8 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 | /api/status | Yes | GET | Scraper refresh status |
 | /api/refresh | Yes | POST | Trigger manual refresh |
 | /api/settings | Yes | GET/POST | Dashboard settings (days, max) |
+| /api/custom-comparison | Yes | POST | Formula-based accumulator comparison (instant, used by Quick Compare) |
+| /api/live-comparison | Yes | POST | Live betslip check via betslip service with formula fallback |
 
 ## Authentication
 - JWT tokens stored in HTTP-only cookies
@@ -122,6 +153,14 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 - **URL**: odds-dashboard-production.up.railway.app
 - **Build**: Dockerfile installs Python deps + Playwright Chromium
 - **CI**: GitHub Actions runs pytest on every push
+
+### Betslip Service Deployment
+
+- **Platform**: Railway (Asia Southeast, asia-southeast1-eqsg3a)
+- **Service name**: innovative-tranquility
+- **URL**: innovative-tranquility-production.up.railway.app
+- **Start command**: uvicorn betslip_service:app --host 0.0.0.0 --port 8080
+- **Auto-deploy**: Same repo, pushes to main trigger deployment
 
 ## Known Gotchas
 
