@@ -68,6 +68,92 @@ from merge import (
     merge_odds,
 )
 
+BOOKMAKERS = ["bet9ja", "sportybet", "msport", "betgr8"]
+
+# Global cache with expanded structure for 5 bookmakers
+cache = {
+    "rows": [],
+    "last_updated": None,
+    "status": "Not yet refreshed",
+    "is_refreshing": False,
+    "raw_bet9ja": [],
+    "raw_sportybet": [],
+    "raw_betking": [],
+    "raw_msport": [],
+    "raw_betano": [],
+    "raw_betgr8": [],
+    "match_name_map": {},
+}
+
+# Dummy user database (replace with real DB in production)
+users = {
+    "admin": {
+        "password_hash": bcrypt.hashpw(b"admin123", bcrypt.gensalt()).decode(),
+        "role": "admin",
+    },
+    "vinz": {
+        "password_hash": bcrypt.hashpw(b"odds2026", bcrypt.gensalt()).decode(),
+        "role": "admin",
+    },
+}
+
+scheduler = None
+
+
+def init_db():
+    """Initialize SQLite database with schema for all 5 bookmakers."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS odds_history (
+            id INTEGER PRIMARY KEY,
+            timestamp TEXT,
+            league TEXT,
+            event TEXT,
+            market TEXT,
+            sign TEXT,
+            bet9ja_odds REAL,
+            sportybet_odds REAL,
+            betking_odds REAL,
+            msport_odds REAL,
+            betano_odds REAL,
+            betgr8_odds REAL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def save_odds_to_db(rows: list):
+    """Save current odds snapshot to SQLite database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        timestamp = datetime.now().isoformat()
+        for row in rows:
+            cursor.execute(
+                """INSERT INTO odds_history (timestamp, league, event, market, sign,
+                    bet9ja_odds, sportybet_odds, betking_odds, msport_odds, betano_odds, betgr8_odds)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    timestamp,
+                    row.get("league", ""),
+                    row.get("event", ""),
+                    row.get("market", ""),
+                    row.get("sign", ""),
+                    row.get("bet9ja"),
+                    row.get("sportybet"),
+                    row.get("betking"),
+                    row.get("msport"),
+                    row.get("betano"),
+                    row.get("betgr8"),
+                ),
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error saving to DB: {e}")
+
 
 async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_MATCHES, days: int = None):
     """Safely scrape a bookmaker with error handling and per-scraper timeout."""
