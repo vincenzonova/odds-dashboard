@@ -55,6 +55,10 @@ SCRAPER_TIMEOUTS = {
     "MSport": 600,      # Playwright, 10 days needs 6-8 min
     "Betgr8": 420,      # Playwright, needs 4-5 min with O/U 1.5 pass-4 min
 }
+
+# ── Betslip Service (separate Railway instance) ───────────────────────
+BETSLIP_SERVICE_URL = os.getenv("BETSLIP_SERVICE_URL", "")
+BETSLIP_API_SECRET = os.getenv("BETSLIP_API_SECRET", "betslip-secret-key")
 DEFAULT_SCRAPER_TIMEOUT = 120
 GATHER_TIMEOUT_SECONDS = 600
 
@@ -516,23 +520,12 @@ async def api_live_comparison(
     current_user: str = Depends(get_current_user),
 ):
     """
-    Live betslip comparison - navigates to each bookmaker website,
-    adds the selected events to their betslip, and reads back the
-    actual bonus percentage and potential winnings.
+    Live betslip comparison — proxies to the separate betslip service.
+    The betslip service runs Playwright on its own Railway instance to
+    avoid resource contention with the main odds scraper.
 
-    Uses a separate Playwright browser to avoid interfering with
-    normal odds scraping.
-
-    Expected body:
-    {
-        "selections": [
-            {"event": "Arsenal - Everton", "home": "Arsenal", "away": "Everton",
-             "sign": "1", "market": "1X2"},
-            ...
-        ],
-        "stake": 100,
-        "bookmakers": ["bet9ja", "sportybet", "msport", "betgr8"]
-    }
+    Falls back to formula-based calculation if the betslip service is
+    not configured or unreachable.
     """
     try:
         body = await request.json()
@@ -543,24 +536,51 @@ async def api_live_comparison(
         if not selections:
             raise HTTPException(status_code=400, detail="No selections provided")
 
-        # Run live betslip scraping (separate browser instance)
-        from betslip_scraper import scrape_live_betslips
-        results = await scrape_live_betslips(
-            selections=selections,
-            stake=stake,
-            bookmakers=bookmakers,
-        )
+        # If betslip service URL is configured, call the external service
+        if BETSLIP_SERVICE_URL:
+            import httpx
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                resp = await client.post(
+                    f"{BETSLIP_SERVICE_URL}/api/scrape-betslips",
+                    json={
+                        "selections": selections,
+                        "stake": stake,
+                        "bookmakers": bookmakers,
+                        "secret": BETSLIP_API_SECRET,
+                    },
+                )
+                if resp.status_code == 200:
+                    return JSONResponse(resp.json())
+                else:
+                    logger.warning(
+                        f"Betslip service returned {resp.status_code}: {resp.text}"
+                    )
+                    # Fall through to formula fallback
 
-        return JSONResponse({
-            "results": results,
-            "selections": selections,
-            "size": len(selections),
-            "stake": stake,
-        })
+        # Fallback: formula-based calculation (same as custom-comparison)
+        logger.info("Betslip service not available, using formula fallback")
+        all_calcs = {
+            "bet9ja": lambda: calculate_bet9ja_returns(selections, stake),
+            "sportybet": lambda: _sportybet_formula_fallback(selections, stake),
+            "msport": lambda: calculate_msport_returns(selections, stake),
+            "betgr8": lambda: calculate_betgr8_returns(selections, stake),
+        }
+        result = {}
+        for bm in bookmakers:
+            if bm in all_calcs:
+                result[bm] = all_calcs[bm]()
+        result["selections"] = selections
+        result["size"] = len(selections)
+        result["stake"] = stake
+        result["source"] = "formula_fallback"
+        return JSONResponse(result)
+
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Live comparison failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/accumulators")
 async def get_accumulators(current_user: str = Depends(get_current_user)):
     """Get computed best accumulators with returns for all bookmakers."""
