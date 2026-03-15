@@ -194,7 +194,8 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
   <!-- Selection Bar -->
   <div class="selection-bar" id="selection-bar">
     <span class="selection-count" id="selection-count">0 selections</span>
-    <button class="compare-btn" id="compare-btn" onclick="generateCustomComparison()">Generate Comparison</button>
+    <button class="compare-btn" id="compare-btn" onclick="generateCustomComparison()">Quick Compare</button>
+        <button class="compare-btn" id="live-check-btn" onclick="generateLiveComparison()" style="background:#f59e0b;margin-left:8px;">Live Check</button>
   </div>
 
   <!-- Table -->
@@ -230,7 +231,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
     <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="msport" checked> MSport</label>
     <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="betgr8" checked> Betgr8</label>
   </div>
-  <div class="acca-loading" id="acca-loading" style="display:none">Scraping live betslips&hellip;</div>
+  <div class="acca-loading" id="acca-loading" style="display:none">Generating comparison&hellip;</div>
   <div class="acca-grid" id="acca-grid" style="display:none"></div>
   <div class="acca-empty" id="acca-empty">
     <p>Select rows from the Odds Dashboard, choose bookmakers above, and click "Generate Comparison".</p>
@@ -519,7 +520,7 @@ function updateSelectionBar() {{
         body: JSON.stringify({{selections: selectedRows, stake: 100, bookmakers: bookmakers}})
       }});
 
-      if (!res.ok) throw new Error('API error');
+      if (!res.ok) {{ const errData = await res.json().catch(() => ({{}})); throw new Error(res.status + ': ' + (errData.detail || 'API error')); }}
       const data = await res.json();
 
       renderCustomComparison(data);
@@ -527,11 +528,62 @@ function updateSelectionBar() {{
       console.error('Error:', e);
       document.getElementById('acca-loading').style.display = 'none';
       document.getElementById('acca-empty').style.display = '';
-      alert('Failed to generate comparison. Please try again.');
+      if (e.message && e.message.startsWith('401')) {{ alert('Session expired. Please log in again.'); window.location.href = '/login'; }} else {{ alert('Failed to generate comparison: ' + (e.message || 'Unknown error')); }}
     }}
   }}
 
-  function renderCustomComparison(data) {{
+  async function generateLiveComparison() {{
+        if (selectedIndices.size === 0) {{ alert('Please select at least one row'); return; }}
+        const selectedRows = Array.from(selectedIndices).map(idx => filteredRows[idx]);
+        const bookmakers = Array.from(document.querySelectorAll('.bm-check:checked')).map(c => c.value);
+        document.getElementById('acca-loading').style.display = '';
+        document.getElementById('acca-loading').textContent = 'Live checking betslips on bookmaker sites... (this may take 2-5 minutes)';
+        document.getElementById('acca-empty').style.display = 'none';
+        document.getElementById('acca-grid').style.display = 'none';
+        document.querySelectorAll('.tab-btn')[1].click();
+        try {{
+            const res = await fetch('/api/live-comparison', {{
+                method: 'POST',
+                headers: Object.assign({{'Content-Type': 'application/json'}}, getAuthHeaders()),
+                body: JSON.stringify({{selections: selectedRows, stake: 100, bookmakers: bookmakers}})
+            }});
+            if (!res.ok) {{ const errData = await res.json().catch(() => ({{}})); throw new Error(res.status + ': ' + (errData.detail || 'API error')); }}
+            const data = await res.json();
+            renderLiveComparison(data);
+        }} catch (e) {{
+            console.error('Live comparison error:', e);
+            document.getElementById('acca-loading').style.display = 'none';
+            document.getElementById('acca-empty').style.display = '';
+            if (e.message && e.message.startsWith('401')) {{ alert('Session expired. Please log in again.'); window.location.href = '/login'; }}
+            else {{ alert('Live check failed: ' + (e.message || 'Unknown error') + '. Try Quick Compare instead.'); }}
+        }}
+    }}
+
+    function renderLiveComparison(data) {{
+        const grid = document.getElementById('acca-grid');
+        if (!grid) return;
+        grid.innerHTML = '';
+        document.getElementById('acca-loading').style.display = 'none';
+        document.getElementById('acca-empty').style.display = 'none';
+        grid.style.display = '';
+        const results = data.results || data;
+        const sels = data.selections || [];
+        const stake = data.stake || 100;
+        const acca = {{ size: sels.length, selections: sels, returns: {{}} }};
+        const BOOKS = ['bet9ja','sportybet','msport','betgr8'];
+        BOOKS.forEach(b => {{
+            const r = results[b] || {{}};
+            if (r.status === 'success' && r.potential_win) {{
+                acca.returns[b] = {{ odds: r.total_odds || 0, base_win: r.potential_win || 0, bonus_percent: r.bonus_percent || 0, bonus_amount: 0, potential_win: r.potential_win || 0 }};
+            }} else {{
+                acca.returns[b] = {{ odds: 0, base_win: 0, bonus_percent: 0, bonus_amount: 0, potential_win: 0 }};
+            }}
+        }});
+        const card = createAccaCard(acca, 0);
+        grid.appendChild(card);
+    }}
+
+    function renderCustomComparison(data) {{
     const grid = document.getElementById('acca-grid');
     if (!grid) return;
     grid.innerHTML = '';
