@@ -223,10 +223,17 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 
 <!-- ============= TAB 2: BET COMPARISON ============== -->
 <div class="tab-content" id="tab-accumulators">
-  <div class="acca-loading" id="acca-loading">Loading accumulators&hellip;</div>
+  <div id="bookmaker-select" style="display:flex;gap:16px;padding:12px 16px;background:#1a1d27;border-radius:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap;">
+    <span style="color:#aaa;font-size:.85rem;font-weight:600;">Compare on:</span>
+    <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="bet9ja" checked> Bet9ja</label>
+    <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="sportybet" checked> SportyBet</label>
+    <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="msport" checked> MSport</label>
+    <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="betgr8" checked> Betgr8</label>
+  </div>
+  <div class="acca-loading" id="acca-loading" style="display:none">Scraping live betslips&hellip;</div>
   <div class="acca-grid" id="acca-grid" style="display:none"></div>
-  <div class="acca-empty" id="acca-empty" style="display:none">
-    <p>No accumulators available yet. Select rows from the Odds Dashboard and click "Generate Comparison".</p>
+  <div class="acca-empty" id="acca-empty">
+    <p>Select rows from the Odds Dashboard, choose bookmakers above, and click "Generate Comparison".</p>
   </div>
 </div>
 
@@ -333,7 +340,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {{
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-    if (btn.dataset.tab === 'accumulators') loadAccumulators();
+    // loadAccumulators removed - comparison tab starts empty
   }});
 }});
 
@@ -502,7 +509,7 @@ async function generateCustomComparison() {{
     const res = await fetch('/api/custom-comparison', {{
       method: 'POST',
       headers: Object.assign({{'Content-Type': 'application/json'}}, getAuthHeaders()),
-      body: JSON.stringify({{selections: selectedRows, stake: 100}})
+        body: JSON.stringify({{selections: selectedRows, stake: 100, bookmakers: Array.from(document.querySelectorAll('.bm-check:checked')).map(c => c.value)}})
     }});
 
     if (!res.ok) throw new Error('API error');
