@@ -4,7 +4,7 @@
 
 | File | Size | Purpose |
 |------|------|---------|
-| `main.py` | ~602 lines | Core app: FastAPI routes, auth, cache, scheduler, dashboard entry (imports merge logic from merge.py) |
+| `main.py` | ~658 lines | Core app: FastAPI routes, auth, cache, scheduler, dashboard entry (imports merge logic from merge.py) |
 | `merge.py` | ~616 lines | Team matching and odds merging: TEAM_ALIASES, SIGN_SWAP_MAP, _normalize_team, _team_sim, fuzzy_match_event, merge_odds |
 | `dashboard.py` | ~31KB | Dashboard HTML/JS/CSS template (rendered inside Python f-string) |
 | `bet9ja_scraper.py` | ~6KB | Bet9ja API scraper (aiohttp, no browser needed) |
@@ -12,6 +12,7 @@
 | `msport_scraper.py` | ~22KB | MSport Playwright scraper (multi-pass: 1X2, O/U, DC) |
 | `betgr8_scraper.py` | ~34KB | Betgr8 Playwright scraper (multi-league, multi-market) |
 | `betslip_checker.py` | ~26KB | Accumulator/betslip checking logic |
+| `betslip_scraper.py` | ~15KB | Live betslip scraper (Playwright-based, separate browser) |
 | `debug_routes.py` | ~2KB | Debug API endpoints |
 | `test_main.py` | ~42KB | Pytest test suite |
 
@@ -132,6 +133,8 @@ Persists merged odds rows to SQLite. Note: Railway has no persistent storage, so
 | `/api/odds/{league}` | GET | Yes | Odds filtered by league |
 | `/api/status` | GET | Yes | Scraper status and last refresh time |
 | `/api/refresh` | POST | Yes | Trigger manual refresh |
+| `/api/custom-comparison` | POST | Yes | Calculate returns for selected events across bookmakers |
+| `/api/live-comparison` | POST | Yes | Live betslip scraping via separate Playwright browser |
 
 ## Authentication
 
@@ -153,7 +156,7 @@ Key JS features:
 - League filter dropdown
 - Date range filter
 - Auto-refresh polling with progress indicator
-- Accumulator builder (select odds, see combined payout)
+- Bet Comparison tab with bookmaker checkboxes and Generate Comparison flow
 
 ## Testing (test_main.py)
 
