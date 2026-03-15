@@ -30,7 +30,6 @@ from debug_routes import router as debug_router
 
 # Import betslip checker with all return calculators
 from betslip_checker import (
-from betslip_scraper import scrape_live_betslips
     check_all_accumulators,
     calculate_bet9ja_returns,
     # calculate_betking_returns,  # PAUSED
@@ -545,6 +544,7 @@ async def api_live_comparison(
             raise HTTPException(status_code=400, detail="No selections provided")
 
         # Run live betslip scraping (separate browser instance)
+        from betslip_scraper import scrape_live_betslips
         results = await scrape_live_betslips(
             selections=selections,
             stake=stake,
