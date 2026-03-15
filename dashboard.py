@@ -513,7 +513,7 @@ function updateSelectionBar() {{
     document.querySelectorAll('.tab-btn')[1].click();
 
     try {{
-      const res = await fetch('/api/live-comparison', {{
+      const res = await fetch('/api/custom-comparison', {{
         method: 'POST',
         headers: Object.assign({{'Content-Type': 'application/json'}}, getAuthHeaders()),
         body: JSON.stringify({{selections: selectedRows, stake: 100, bookmakers: bookmakers}})
@@ -527,7 +527,7 @@ function updateSelectionBar() {{
       console.error('Error:', e);
       document.getElementById('acca-loading').style.display = 'none';
       document.getElementById('acca-empty').style.display = '';
-      alert('Failed to generate comparison. Live scraping may have timed out.');
+      alert('Failed to generate comparison. Please try again.');
     }}
   }}
 
