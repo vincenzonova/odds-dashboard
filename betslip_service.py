@@ -101,7 +101,7 @@ async def scrape_betslips(request: Request):
         )
 
         status_list = [f"{bm}={r.get('status')}" for bm, r in results.items()]
-            logger.info(f"Scrape complete: {status_list}")
+        logger.info(f"Scrape complete: {status_list}")
 
         return JSONResponse({"results": results})
 
