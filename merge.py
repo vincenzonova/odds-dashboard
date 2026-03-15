@@ -583,6 +583,15 @@ def merge_odds(raw_data: dict) -> list:
     merged_rows = []
     for league, entries in league_index.items():
         for key, entry in entries.items():
+            # FILTER: Only show events that exist on Bet9ja (base bookmaker)
+            has_bet9ja = any(
+                "bet9ja" in bk_odds
+                for signs in entry["markets"].values()
+                for bk_odds in signs.values()
+            )
+            if not has_bet9ja:
+                continue
+
             league = entry["league"]
             event_name = entry["event"]
             for market, signs in entry["markets"].items():
