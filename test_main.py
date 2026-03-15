@@ -340,7 +340,11 @@ class TestMergeOdds:
     def test_sportybet_odds_key(self):
         """SportyBet uses 'odds' key instead of 'markets'."""
         raw = {
-            "bet9ja": [],
+            "bet9ja": [
+                self._make_event("Arsenal - Everton", "Premier League", {
+                    "1X2": {"1": "1.50", "X": "3.20", "2": "5.00"}
+                })
+            ],
             "sportybet": [
                 {
                     "event": "Arsenal - Everton",
@@ -354,6 +358,23 @@ class TestMergeOdds:
         rows = merge_odds(raw)
         assert len(rows) == 3
         assert rows[0]["sportybet"] != "-"
+
+    def test_bet9ja_base_filter(self):
+        """Events without Bet9ja odds should be excluded (Bet9ja is base bookmaker)."""
+        raw = {
+            "bet9ja": [],
+            "sportybet": [
+                {
+                    "event": "Liverpool - Chelsea",
+                    "league": "Premier League",
+                    "odds": {"1X2": {"1": "1.55", "X": "3.10", "2": "4.80"}},
+                }
+            ],
+            "msport": [],
+            "betgr8": [],
+        }
+        rows = merge_odds(raw)
+        assert len(rows) == 0, "Events without Bet9ja should be filtered out"
 
 
 # ═══════════════════════════════════════════════════════════════════════
