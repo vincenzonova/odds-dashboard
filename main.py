@@ -30,6 +30,7 @@ from debug_routes import router as debug_router
 
 # Import betslip checker with all return calculators
 from betslip_checker import (
+from betslip_scraper import scrape_live_betslips
     check_all_accumulators,
     calculate_bet9ja_returns,
     # calculate_betking_returns,  # PAUSED
@@ -508,6 +509,58 @@ async def api_custom_comparison(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+
+@app.post("/api/live-comparison")
+async def api_live_comparison(
+    request: Request,
+    current_user: str = Depends(get_current_user),
+):
+    """
+    Live betslip comparison - navigates to each bookmaker website,
+    adds the selected events to their betslip, and reads back the
+    actual bonus percentage and potential winnings.
+
+    Uses a separate Playwright browser to avoid interfering with
+    normal odds scraping.
+
+    Expected body:
+    {
+        "selections": [
+            {"event": "Arsenal - Everton", "home": "Arsenal", "away": "Everton",
+             "sign": "1", "market": "1X2"},
+            ...
+        ],
+        "stake": 100,
+        "bookmakers": ["bet9ja", "sportybet", "msport", "betgr8"]
+    }
+    """
+    try:
+        body = await request.json()
+        selections = body.get("selections", [])
+        stake = body.get("stake", 100.0)
+        bookmakers = body.get("bookmakers", ["bet9ja", "sportybet", "msport", "betgr8"])
+
+        if not selections:
+            raise HTTPException(status_code=400, detail="No selections provided")
+
+        # Run live betslip scraping (separate browser instance)
+        results = await scrape_live_betslips(
+            selections=selections,
+            stake=stake,
+            bookmakers=bookmakers,
+        )
+
+        return JSONResponse({
+            "results": results,
+            "selections": selections,
+            "size": len(selections),
+            "stake": stake,
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 @app.get("/api/accumulators")
 async def get_accumulators(current_user: str = Depends(get_current_user)):
     """Get computed best accumulators with returns for all bookmakers."""
