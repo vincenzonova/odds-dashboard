@@ -574,7 +574,7 @@ def _team_sim(a: str, b: str) -> float:
     # Character-level similarity as fallback
     return SequenceMatcher(None, a, b).ratio()
 
-def fuzzy_match_event(event1: str, event2: str, threshold: float = 0.55) -> tuple:
+def fuzzy_match_event(event1: str, event2: str, threshold: float = 0.70) -> tuple:
     """
     Fuzzy matching for event names across bookmakers.
     Returns (is_match: bool, is_reversed: bool).
@@ -646,7 +646,11 @@ def merge_odds(raw_data: dict) -> list:
             is_reversed = False
             matched_league = league
             for existing_key in league_index[league]:
-                existing_event = league_index[league][existing_key]["event"]
+                existing_entry = league_index[league][existing_key]
+                # Skip if this bookmaker already has odds in this entry
+                if any(bk_name in bk_odds for mkt in existing_entry.get("markets", {}).values() for bk_odds in mkt.values()):
+                    continue
+                existing_event = existing_entry["event"]
                 match_result = fuzzy_match_event(existing_event, event_name)
                 if match_result[0]:  # is_match
                     matched_key = existing_key
@@ -660,8 +664,12 @@ def merge_odds(raw_data: dict) -> list:
                     if other_league == league:
                         continue
                     for existing_key in league_index[other_league]:
-                        existing_event = league_index[other_league][existing_key]["event"]
-                        match_result = fuzzy_match_event(existing_event, event_name, threshold=0.65)
+                        existing_entry = league_index[other_league][existing_key]
+                        # Skip if this bookmaker already has odds in this entry
+                        if any(bk_name in bk_odds for mkt in existing_entry.get("markets", {}).values() for bk_odds in mkt.values()):
+                            continue
+                        existing_event = existing_entry["event"]
+                        match_result = fuzzy_match_event(existing_event, event_name, threshold=0.75)
                         if match_result[0]:
                             matched_key = existing_key
                             matched_league = other_league
