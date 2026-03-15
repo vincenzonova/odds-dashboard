@@ -566,10 +566,10 @@ class TestAPIEndpoints:
         token = login_resp.json().get("access_token", "")
         # Call custom-comparison with auth
         resp = client.post("/api/custom-comparison",
-            json={"selections": [], "stake": 100, "bookmakers": ["bet9ja"]},
+            json={"selections": [{"event": "Team A - Team B", "sign": "1", "market": "1X2", "bet9ja": "1.50"}], "stake": 100, "bookmakers": ["bet9ja"]},
             headers={"Authorization": f"Bearer {token}"}
         )
-        # Should succeed (200) even with empty selections
+        # Should succeed (200) with valid selection
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
         data = resp.json()
         assert "size" in data
