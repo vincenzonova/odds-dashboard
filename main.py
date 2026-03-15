@@ -551,15 +551,19 @@ async def api_live_comparison(
                     },
                 )
                 if resp.status_code == 200:
-                    return JSONResponse(resp.json())
+                    betslip_data = resp.json()
+                    # Ensure selections are in the response for frontend
+                    if "selections" not in betslip_data:
+                        betslip_data["selections"] = selections
+                    betslip_data["size"] = len(selections)
+                    betslip_data["stake"] = stake
+                    return JSONResponse(betslip_data)
                 else:
-                    logger.warning(
-                        f"Betslip service returned {resp.status_code}: {resp.text}"
-                    )
+                    print(f"[live-comparison] Betslip service returned {resp.status_code}: {resp.text}")
                     # Fall through to formula fallback
 
         # Fallback: formula-based calculation (same as custom-comparison)
-        logger.info("Betslip service not available, using formula fallback")
+        print("[live-comparison] Betslip service not available, using formula fallback")
         all_calcs = {
             "bet9ja": lambda: calculate_bet9ja_returns(selections, stake),
             "sportybet": lambda: _sportybet_formula_fallback(selections, stake),
@@ -579,7 +583,7 @@ async def api_live_comparison(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Live comparison failed: {e}", exc_info=True)
+        print(f"[live-comparison] Live comparison failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/accumulators")
