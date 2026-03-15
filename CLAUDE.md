@@ -65,6 +65,14 @@ If you add new market types, update this map.
 If a scraper is currently working and returning correct odds, do NOT refactor it without
 confirming with the project owner first. **Stability > cleanliness.**
 
+### Live-comparison uses print(), NOT logging
+
+The `/api/live-comparison` endpoint and all of main.py uses `print()` for logging. Do NOT use `logger` or `logging` module — it will cause NameError crashes at runtime since no logger is configured.
+
+### Betslip service is a separate Railway instance
+
+The betslip service (`betslip_service.py`) runs on its own Railway deployment. The main service calls it via HTTP. If the betslip service is down, the main service falls back to formula-based comparison. Environment vars `BETSLIP_SERVICE_URL` and `BETSLIP_API_SECRET` must be set on the main service.
+
 ### Railway has NO persistent storage
 SQLite DB is ephemeral — it resets on every deploy. Do not build features that depend on
 historical data persisting.
@@ -115,6 +123,8 @@ All tests must pass before committing. If a test fails:
 | `msport_scraper.py`     | MSport Playwright scraper                   |
 | `betgr8_scraper.py`     | Betgr8 Playwright scraper                   |
 | `betslip_checker.py`    | Accumulator/betslip logic                   |
+| `betslip_scraper.py`   | Playwright-based betslip scraping for live checks |
+| `betslip_service.py`   | FastAPI microservice for betslip (separate Railway instance) |
 | `test_main.py`          | Test suite (pytest)                         |
 | `docs/ARCHITECTURE.md`  | System architecture                         |
 | `docs/PRODUCT.md`       | Product overview and priorities              |
