@@ -4,7 +4,8 @@
 
 | File | Size | Purpose |
 |------|------|---------|
-| `main.py` | ~1192 lines | Core app: FastAPI routes, merge logic, TEAM_ALIASES, auth, dashboard entry |
+| `main.py` | ~602 lines | Core app: FastAPI routes, auth, cache, scheduler, dashboard entry (imports merge logic from merge.py) |
+| `merge.py` | ~616 lines | Team matching and odds merging: TEAM_ALIASES, SIGN_SWAP_MAP, _normalize_team, _team_sim, fuzzy_match_event, merge_odds |
 | `dashboard.py` | ~31KB | Dashboard HTML/JS/CSS template (rendered inside Python f-string) |
 | `bet9ja_scraper.py` | ~6KB | Bet9ja API scraper (aiohttp, no browser needed) |
 | `sportybet_scraper.py` | ~15KB | SportyBet Playwright scraper with JS injection |
@@ -34,7 +35,7 @@ DEFAULT_SCRAPER_TIMEOUT = 120                           # L59
 GATHER_TIMEOUT_SECONDS = 600                            # L60 — total gather timeout
 ```
 
-## TEAM_ALIASES (main.py L66-L1138)
+## TEAM_ALIASES (merge.py L25-L400)
 
 A dictionary mapping ~1073 lines of team name variations to canonical names. This is critical for matching the same team across different bookmakers that use different spellings.
 
@@ -48,18 +49,18 @@ TEAM_ALIASES = {
 }
 ```
 
-## Key Functions (main.py)
+## Key Functions (merge.py — matching/merge pipeline)
 
-### `_normalize_team(name: str) -> str` (L534)
+### `_normalize_team(name: str) -> str` (merge.py L402)
 Normalizes a team name by lowercasing, stripping whitespace, removing common suffixes ("fc", "sc"), and looking up TEAM_ALIASES. Returns the canonical team name string.
 
-### `_team_sim(a: str, b: str) -> float` (L555)
+### `_team_sim(a: str, b: str) -> float` (merge.py L423)
 Computes similarity between two team names using `SequenceMatcher`. Both names are normalized first via `_normalize_team()`. Returns a float 0.0-1.0.
 
-### `fuzzy_match_event(event1, event2, threshold=0.70) -> tuple` (L577)
+### `fuzzy_match_event(event1, event2, threshold=0.70) -> tuple` (merge.py L445)
 Compares two match events (each formatted as "Team A - Team B"). Splits on " - ", computes team similarity for both orderings (same order and swapped), and returns `(is_match, should_swap)`. The threshold was raised from 0.55 to 0.70 to prevent false positives (e.g., "wolverhampton" vs "everton" was matching at 0.60).
 
-### `merge_odds(raw_data: dict) -> list` (L622)
+### `merge_odds(raw_data: dict) -> list` (merge.py L490)
 The core merging function. Takes raw scraper output keyed by bookmaker name and produces a unified list of match rows with odds from all bookmakers aligned.
 
 **Two-pass approach:**
@@ -68,7 +69,7 @@ The core merging function. Takes raw scraper output keyed by bookmaker name and 
 
 **Duplicate bookmaker protection (L646+):** If a bookmaker already has odds for a merged event, the incoming duplicate is skipped rather than overwriting. This prevents fuzzy matching from incorrectly replacing correct odds.
 
-### SIGN_SWAP_MAP (L63)
+### SIGN_SWAP_MAP (merge.py L21)
 When team order is reversed between bookmakers, odds signs must be swapped:
 ```python
 SIGN_SWAP_MAP = {
@@ -78,10 +79,12 @@ SIGN_SWAP_MAP = {
 }
 ```
 
-### `safe_scrape(bookmaker_name, scrape_func, max_matches, days)` (L748)
+## Key Functions (main.py — app logic)
+
+### `safe_scrape(bookmaker_name, scrape_func, max_matches, days)` (main.py L158)
 Wraps individual scraper calls with timeout handling and error logging. Returns empty list on failure.
 
-### `do_refresh()` (L778)
+### `do_refresh()` (main.py L188)
 Orchestrates a full refresh cycle:
 1. Runs Bet9ja (API) in parallel with sequential Playwright scrapers (SportyBet -> MSport -> Betgr8)
 2. Calls `merge_odds()` on collected data
