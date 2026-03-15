@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from functools import wraps
 from difflib import SequenceMatcher
-from fastapi import FastAPI, Requst, Depends, HTTPException, status
+from fastapi import FastAPI, Request, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
