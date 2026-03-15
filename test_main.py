@@ -585,9 +585,9 @@ class TestNormalizeTeam:
         assert _normalize_team("Paris SG") == "psg"
 
     def test_accent_handling(self):
-                # Bayern München resolves to "bayern" via alias (alias takes priority)
+        # Bayern München resolves to "bayern" via alias (alias takes priority)
         result = _normalize_team("Bayern München")
-                assert result == "bayern"  # alias resolution strips München
+        assert result == "bayern"  # alias resolution strips München
 
     def test_dot_removal(self):
         result = _normalize_team("Nott. Forest")
