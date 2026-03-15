@@ -1,21 +1,29 @@
 # CLAUDE.md — Agent Session Bootstrap
 
-> **This file is read by AI agents (Claude Code, Copilot, etc.) at the start of every session.**
+> This file is read by AI agents (Claude Code, Copilot, etc.) at the start of every session.
 > It ensures agents understand the project before making changes.
 
 ---
 
-## MANDATORY WORKFLOW
+## MANDATORY DEVELOPMENT WORKFLOW
 
-Every code change MUST follow this sequence:
+Every code change MUST follow this 7-step sequence:
 
-```
-1. READ DOCS   → Read relevant docs/ files before touching any code
-2. APPLY CHANGE → Make the code change
-3. RUN TESTS   → Run `pytest test_main.py -v` and confirm all tests pass
-```
+1. **READ DOCS** → Read relevant `docs/` files before touching any code
+2. **CREATE DOCS** → Write/update documentation for the feature you're about to implement
+3. **IMPLEMENT & TEST** → Make the code change AND write tests for new features
+4. **UPDATE DOCS** → Update all affected documentation to reflect the changes made
+5. **RUN ALL TESTS** → Run `pytest test_main.py -v` and confirm all tests pass
+6. **DEPLOY** → Commit and push to main (Railway auto-deploys)
+7. **RECHECK** → Verify the deployment works correctly on the live dashboard
 
 **Do NOT skip steps. Do NOT commit if tests fail.**
+
+### Key Rules
+
+- **Tests are MANDATORY for new features** — every new feature must have corresponding test coverage
+- **Documentation must ALWAYS be updated** — after any change, all affected docs must be brought up to date
+- **Run tests after EVERY change** — no exceptions
 
 ---
 
@@ -23,40 +31,47 @@ Every code change MUST follow this sequence:
 
 Before making ANY code change, read the relevant documentation:
 
-| If you're changing... | Read this first |
-|----------------------|-----------------|
-| Merge logic, fuzzy matching, TEAM_ALIASES | `docs/CODE_DOCS.md` (Key Functions section) |
-| Scraper behavior | `docs/CODE_DOCS.md` (Scraper Architecture section) |
-| Dashboard JS/CSS | `docs/CODE_DOCS.md` (Dashboard section) |
-| API endpoints or auth | `docs/CODE_DOCS.md` (API Endpoints section) |
-| Deployment or config | `docs/ARCHITECTURE.md` |
-| Business priorities or scope | `docs/PRODUCT.md` |
-| Anything in main.py | `docs/CODE_DOCS.md` + `docs/ARCHITECTURE.md` |
+| If you're changing...                     | Read this first                                          |
+|-------------------------------------------|----------------------------------------------------------|
+| Merge logic, fuzzy matching, TEAM_ALIASES | `docs/CODE_DOCS.md` (Key Functions section)              |
+| Scraper behavior                          | `docs/CODE_DOCS.md` (Scraper Architecture section)       |
+| Dashboard JS/CSS                          | `docs/CODE_DOCS.md` (Dashboard section)                  |
+| API endpoints or auth                     | `docs/CODE_DOCS.md` (API Endpoints section)              |
+| Deployment or config                      | `docs/ARCHITECTURE.md`                                   |
+| Business priorities or scope              | `docs/PRODUCT.md`                                        |
+| Anything in main.py                       | `docs/CODE_DOCS.md` + `docs/ARCHITECTURE.md`             |
 
 ---
 
 ## Step 2 — Critical Gotchas (read before coding)
 
 ### Dashboard JS lives inside a Python f-string
-All literal JS braces `{}` MUST be doubled `{{ }}` in `dashboard.py`. Forgetting this causes Python crashes at runtime — not at test time.
+All literal JS braces `{}` MUST be doubled `{{ }}` in `dashboard.py`.
+Forgetting this causes Python crashes at runtime — not at test time.
 
 ### Fuzzy matching threshold is 0.70
-The threshold in `fuzzy_match_event()` was raised from 0.55 to 0.70 to prevent false positives. DO NOT lower it without explicit approval.
+The threshold in `fuzzy_match_event()` was raised from 0.55 to 0.70 to prevent false positives.
+DO NOT lower it without explicit approval.
 
 ### merge_odds() has duplicate bookmaker protection
-If a bookmaker already has odds for a merged event, incoming duplicates are skipped. Do not remove this guard.
+If a bookmaker already has odds for a merged event, incoming duplicates are skipped.
+Do not remove this guard.
 
 ### SIGN_SWAP_MAP must stay in sync
-When team order is reversed between bookmakers, signs are swapped via SIGN_SWAP_MAP. If you add new market types, update this map.
+When team order is reversed between bookmakers, signs are swapped via `SIGN_SWAP_MAP`.
+If you add new market types, update this map.
 
 ### Scrapers: don't change what works
-If a scraper is currently working and returning correct odds, do NOT refactor it without confirming with the project owner first. Stability > cleanliness.
+If a scraper is currently working and returning correct odds, do NOT refactor it without
+confirming with the project owner first. **Stability > cleanliness.**
 
 ### Railway has NO persistent storage
-SQLite DB is ephemeral — it resets on every deploy. Do not build features that depend on historical data persisting.
+SQLite DB is ephemeral — it resets on every deploy. Do not build features that depend on
+historical data persisting.
 
 ### Playwright scrapers run SEQUENTIALLY
-SportyBet, MSport, and Betgr8 share a single Playwright browser and run one after another. Only Bet9ja (API-based) runs in parallel with them.
+SportyBet, MSport, and Betgr8 share a single Playwright browser and run one after another.
+Only Bet9ja (API-based) runs in parallel with them.
 
 ---
 
@@ -77,34 +92,37 @@ All tests must pass before committing. If a test fails:
 
 ## Project Quick Reference
 
-- **Repo**: vincenzonova/odds-dashboard
-- **Stack**: Python 3.11, FastAPI, Playwright, aiohttp
-- **Deploy**: Railway (EU West Amsterdam), auto-deploys from `main`
-- **Active bookmakers**: bet9ja, sportybet, msport, betgr8
-- **Paused bookmakers**: betking, betano
-- **Priority leagues**: Premier League, La Liga, Serie A, Bundesliga, Ligue 1, Champions League, Europa League
-- **Core objective**: Odds comparison — all bookmakers must load and be comparable
+| Key            | Value                                                |
+|----------------|------------------------------------------------------|
+| **Repo**       | `vincenzonova/odds-dashboard`                        |
+| **Stack**      | Python 3.11, FastAPI, Playwright, aiohttp            |
+| **Deploy**     | Railway (EU West Amsterdam), auto-deploys from main  |
+| **Active bookmakers** | bet9ja, sportybet, msport, betgr8              |
+| **Paused bookmakers** | betking, betano                                |
+| **Priority leagues**  | Premier League, La Liga, Serie A, Bundesliga, Ligue 1, Champions League, Europa League |
+| **Core objective**    | Odds comparison — all bookmakers must load and be comparable |
 
 ---
 
 ## File Map
 
-| File | What it does |
-|------|-------------|
-| `main.py` | FastAPI app, merge logic, TEAM_ALIASES, auth, routes |
-| `dashboard.py` | Dashboard HTML/JS/CSS template |
-| `bet9ja_scraper.py` | Bet9ja API scraper (no browser) |
-| `sportybet_scraper.py` | SportyBet Playwright scraper |
-| `msport_scraper.py` | MSport Playwright scraper |
-| `betgr8_scraper.py` | Betgr8 Playwright scraper |
-| `betslip_checker.py` | Accumulator/betslip logic |
-| `test_main.py` | Test suite (pytest) |
-| `docs/ARCHITECTURE.md` | System architecture |
-| `docs/PRODUCT.md` | Product overview and priorities |
-| `docs/CODE_DOCS.md` | Code-level documentation |
+| File                    | What it does                                |
+|-------------------------|---------------------------------------------|
+| `main.py`               | FastAPI app, merge logic, TEAM_ALIASES, auth, routes |
+| `dashboard.py`          | Dashboard HTML/JS/CSS template              |
+| `bet9ja_scraper.py`     | Bet9ja API scraper (no browser)             |
+| `sportybet_scraper.py`  | SportyBet Playwright scraper                |
+| `msport_scraper.py`     | MSport Playwright scraper                   |
+| `betgr8_scraper.py`     | Betgr8 Playwright scraper                   |
+| `betslip_checker.py`    | Accumulator/betslip logic                   |
+| `test_main.py`          | Test suite (pytest)                         |
+| `docs/ARCHITECTURE.md`  | System architecture                         |
+| `docs/PRODUCT.md`       | Product overview and priorities              |
+| `docs/CODE_DOCS.md`     | Code-level documentation                    |
 
 ---
 
 ## CI / GitHub Actions
 
-The repo has a CI workflow at `.github/workflows/test.yml` that runs `pytest` on every push. Check that CI is green after pushing.
+The repo has a CI workflow at `.github/workflows/test.yml` that runs pytest on every push.
+Check that CI is green after pushing.
