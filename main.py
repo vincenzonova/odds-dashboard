@@ -483,21 +483,24 @@ async def api_custom_comparison(
         body = await request.json()
         selections = body.get("selections", [])
         stake = body.get("stake", 100.0)
+        bookmakers = body.get("bookmakers", ["bet9ja", "sportybet", "msport", "betgr8"])
         if not selections:
             raise HTTPException(status_code=400, detail="No selections provided")
 
-        # Calculate returns for all 5 bookmakers
-        result = {
-            "bet9ja": calculate_bet9ja_returns(selections, stake),
-            "sportybet": _sportybet_formula_fallback(selections, stake),
-            # "betking": calculate_betking_returns(selections, stake),  # PAUSED
-            "msport": calculate_msport_returns(selections, stake),
-            "betgr8": calculate_betgr8_returns(selections, stake),
-            # "betano": calculate_betano_returns(selections, stake),  # PAUSED
-            "selections": selections,
-            "size": len(selections),
-            "stake": stake,
+        # Calculate returns for selected bookmakers
+        all_calcs = {
+            "bet9ja": lambda: calculate_bet9ja_returns(selections, stake),
+            "sportybet": lambda: _sportybet_formula_fallback(selections, stake),
+            "msport": lambda: calculate_msport_returns(selections, stake),
+            "betgr8": lambda: calculate_betgr8_returns(selections, stake),
         }
+        result = {}
+        for bm in bookmakers:
+            if bm in all_calcs:
+                result[bm] = all_calcs[bm]()
+        result["selections"] = selections
+        result["size"] = len(selections)
+        result["stake"] = stake
         return JSONResponse(result)
     except HTTPException:
         raise
