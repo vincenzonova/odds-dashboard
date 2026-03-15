@@ -6,7 +6,7 @@
 |------|------|---------|
 | `main.py` | ~658 lines | Core app: FastAPI routes, auth, cache, scheduler, dashboard entry (imports merge logic from merge.py) |
 | `merge.py` | ~616 lines | Team matching and odds merging: TEAM_ALIASES, SIGN_SWAP_MAP, _normalize_team, _team_sim, fuzzy_match_event, merge_odds |
-| `dashboard.py` | ~31KB | Dashboard HTML/JS/CSS template (rendered inside Python f-string) |
+| `dashboard.py` | ~32KB | Dashboard HTML/JS/CSS template (rendered inside Python f-string) |
 | `bet9ja_scraper.py` | ~6KB | Bet9ja API scraper (aiohttp, no browser needed) |
 | `sportybet_scraper.py` | ~15KB | SportyBet Playwright scraper with JS injection |
 | `msport_scraper.py` | ~22KB | MSport Playwright scraper (multi-pass: 1X2, O/U, DC) |
@@ -156,7 +156,7 @@ Key JS features:
 - League filter dropdown
 - Date range filter
 - Auto-refresh polling with progress indicator
-- Bet Comparison tab with bookmaker checkboxes and Generate Comparison flow
+- Bet Comparison tab with bookmaker checkboxes, Generate Comparison calls `/api/live-comparison` for live betslip scraping
 
 ## Testing (test_main.py)
 
