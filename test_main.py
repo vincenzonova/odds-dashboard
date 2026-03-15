@@ -563,7 +563,7 @@ class TestAPIEndpoints:
         # Login first
         login_resp = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
         assert login_resp.status_code == 200
-        token = login_resp.json().get("token", "")
+        token = login_resp.json().get("access_token", "")
         # Call custom-comparison with auth
         resp = client.post("/api/custom-comparison",
             json={"selections": [], "stake": 100, "bookmakers": ["bet9ja"]},
