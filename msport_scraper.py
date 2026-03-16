@@ -239,7 +239,7 @@ async def _load_and_extract(page, url: str, date_str: str, timeout_ms: int = 250
             await page.wait_for_selector(".m-event", timeout=timeout_ms)
         except Exception:
             return []
-        await page.wait_for_timeout(3000)  # Allow DOM to fully render
+        await page.wait_for_timeout(1200)  # Allow DOM to fully render
         raw_matches = await page.evaluate(JS_EXTRACT_ALL)
         return raw_matches
     except Exception as e:
@@ -259,7 +259,7 @@ async def _switch_ou_line(page, target_line: str) -> bool:
         # Click the first .select-box to open the line dropdown
         select_box = page.locator('.select-box').first
         await select_box.click(timeout=5000)
-        await page.wait_for_timeout(800)
+        await page.wait_for_timeout(300)
 
         # The dropdown options appear as list items or divs inside select-box
         # Try multiple selector strategies
@@ -294,11 +294,11 @@ async def _switch_ou_line(page, target_line: str) -> bool:
             print(f"  [MSport] Could not find dropdown option for {target_line}")
             # Close dropdown by clicking elsewhere
             await page.click('body', position={"x": 10, "y": 10})
-            await page.wait_for_timeout(500)
+            await page.wait_for_timeout(300)
             return False
 
         # Wait for odds to update in DOM
-        await page.wait_for_timeout(2500)
+        await page.wait_for_timeout(1500)
         print(f"  [MSport] Switched O/U line to {target_line}")
         return True
 
@@ -306,7 +306,7 @@ async def _switch_ou_line(page, target_line: str) -> bool:
         print(f"  [MSport] Could not switch to O/U {target_line}: {e}")
         try:
             await page.click('body', position={"x": 10, "y": 10})
-            await page.wait_for_timeout(500)
+            await page.wait_for_timeout(300)
         except Exception:
             pass
         return False
@@ -347,7 +347,7 @@ async def _extract_dc(page, url: str, date_str: str) -> list:
             await page.wait_for_selector(".m-event", timeout=20000)
         except Exception:
             return []
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(2000)
 
         raw = await page.evaluate(JS_EXTRACT_SECOND_MARKET)
         results = []
