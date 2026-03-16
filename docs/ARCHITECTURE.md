@@ -102,7 +102,7 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 | bet9ja_scraper.py | 6KB | Bet9ja API scraper (aiohttp, no browser) |
 | sportybet_scraper.py | 15KB | SportyBet Playwright scraper (JS injection) |
 | msport_scraper.py | 22KB | MSport Playwright scraper (multi-pass: 1X2, O/U, DC) |
-| betgr8_scraper.py | 34KB | Betgr8 Playwright scraper (multi-league, multi-market) |
+| betgr8_scraper.py | 16KB | Betgr8 Playwright scraper (multi-league, multi-market) |
 | betking_scraper.py | 14KB | BetKing scraper (PAUSED - geo-blocked) |
 | betano_scraper.py | 14KB | Betano scraper (PAUSED) |
 | betslip_checker.py | 26KB | Betslip/accumulator checking logic |
@@ -144,7 +144,7 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 
 ## Authentication
 - JWT tokens stored in HTTP-only cookies
-- Users: admin (admin123), vinz (odds2026)
+- Users: admin (admin123), vinz (odds2026), paulo (paulo2026), alessandro (alessandro2026)
 - Passwords hashed with bcrypt
 
 ## Deployment
@@ -152,7 +152,7 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 - **Auto-deploy**: Pushes to main branch trigger automatic deployment
 - **URL**: odds-dashboard-production.up.railway.app
 - **Build**: Dockerfile installs Python deps + Playwright Chromium
-- **CI**: GitHub Actions runs pytest on every push
+- **CI**: GitHub Actions runs pytest on every push to main and staging branches
 
 ### Betslip Service Deployment
 
@@ -161,6 +161,21 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 - **URL**: innovative-tranquility-production.up.railway.app
 - **Start command**: uvicorn betslip_service:app --host 0.0.0.0 --port 8080
 - **Auto-deploy**: Same repo, pushes to main trigger deployment
+
+
+
+### Staging Environment
+- **Branch**: staging (created from main)
+- **Railway service**: stunning-vibrancy
+- **URL**: stunning-vibrancy-production-a011.up.railway.app
+- **Region**: asia-southeast1-eqsg3a
+- **Purpose**: Test scraper optimizations and new features before merging to main
+- **Auto-deploy**: Pushes to staging branch trigger automatic deployment
+- **Scraper wait time optimizations** (staging only):
+  - Betgr8: WAIT_SECONDS=3 (prod: 5), settle time=1s (prod: 2s), dropdown wait=1s (prod: 1.5s)
+  - MSport: DOM render=2s (prod: 3s), dropdown=500ms (prod: 800ms), odds update=1.5s (prod: 2.5s)
+  - SportyBet: unchanged (already optimized)
+  - Bet9ja: unchanged (API-based, no browser waits)
 
 ## Known Gotchas
 
