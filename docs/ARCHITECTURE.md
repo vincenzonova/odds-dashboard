@@ -69,7 +69,7 @@ The betslip service runs as a separate Railway deployment to handle live accumul
 
 ### Scraper Execution Model
 - **Bet9ja** uses a REST API (aiohttp) and runs in parallel with Playwright scrapers
-- **SportyBet, MSport, Betgr8** use Playwright (headless Chromium) and run SEQUENTIALLY because Railway has limited resources for concurrent browser instances
+- **SportyBet, MSport, Betgr8** use Playwright (headless Chromium) and now run in PARALLEL via `asyncio.gather` (Railway Pro plan: 32 vCPU / 32 GB RAM)
 - Each scraper has its own timeout: Bet9ja=60s, SportyBet=420s, MSport=600s, Betgr8=420s
 - Global gather timeout: 600s
 
@@ -119,8 +119,8 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| MAX_MATCHES | 100 | Max matches per scraper |
-| SCRAPE_DAYS | 2 | Default days ahead to scrape |
+| MAX_MATCHES | 160 | Max matches per scraper |
+| SCRAPE_DAYS | 7 | Default days ahead to scrape |
 | MSPORT_MIN_DAYS | 7 | MSport needs wider window |
 | BET9JA_MIN_DAYS | 7 | Bet9ja also uses wider window |
 | REFRESH_INTERVAL_MINUTES | 5 | Auto-refresh interval |
@@ -148,7 +148,7 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 - Passwords hashed with bcrypt
 
 ## Deployment
-- **Platform**: Railway (EU West Amsterdam, europe-west4-drams3a)
+- **Platform**: Railway Pro plan (EU West Amsterdam, europe-west4-drams3a) — 32 vCPU / 32 GB RAM
 - **Auto-deploy**: Pushes to main branch trigger automatic deployment
 - **URL**: odds-dashboard-production.up.railway.app
 - **Build**: Dockerfile installs Python deps + Playwright Chromium
@@ -166,7 +166,7 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 
 1. **Double braces in dashboard JS**: The dashboard HTML is inside a Python f-string. Any JS using `{}` must use `{{ }}` instead
 2. **Ephemeral DB**: SQLite is lost on every deploy. First scrape takes ~6 minutes
-3. **Sequential Playwright scrapers**: Can't run browser scrapers in parallel on Railway's resources
+3. **Bet9ja GROUP IDs are season-specific**: If European competitions return 0 events, IDs in `bet9ja_scraper.py` need updating via the `GetSports?DISP=0` API. Current (2025/26): CL=1185641, EL=1185689, ECL=1946188
 4. **TEAM_ALIASES is huge**: Lines 66-1138 (~1073 lines) are team name mappings. Be careful editing
 5. **test_main.py has duplicate sections**: Lines 532-1062 duplicate lines 1-531 (Python overrides first class, tests still pass)
 6. **SequenceMatcher false positives**: Common substrings like "ver"/"ton" can give deceptively high similarity. Threshold was raised to 0.70 to mitigate
