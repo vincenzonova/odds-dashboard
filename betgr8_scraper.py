@@ -25,6 +25,7 @@ LEAGUE_URLS = {
     "Ligue 1": "https://betgr8.com/ng/competition/ligue-1/8/1",
     "Champions League": "https://betgr8.com/ng/competition/uefa-champions-league/474/1",
     "Europa League": "https://betgr8.com/ng/competition/uefa-europa-league/475/1",
+    "Conference League": "https://betgr8.com/ng/competition/uefa-europa-conference-league/476/1",
 }
 
 # Market tab URL suffixes (appended after the base league URL)
@@ -497,6 +498,7 @@ LEAGUE_URLS = {
     "Ligue 1": "https://betgr8.com/ng/competition/ligue-1/8/1",
     "Champions League": "https://betgr8.com/ng/competition/uefa-champions-league/474/1",
     "Europa League": "https://betgr8.com/ng/competition/uefa-europa-league/475/1",
+    "Conference League": "https://betgr8.com/ng/competition/uefa-europa-conference-league/476/1",
 }
 
 # Market tab URL suffixes (appended after the base league URL)
