@@ -43,7 +43,7 @@ from betslip_checker import (
 # Configuration
 SECRET_KEY = "your-secret-key-change-in-production"
 MAX_MATCHES = 160
-SCRAPE_DAYS = 2  # Default: scrape next 2 days. Configurable via settings (1-10)
+SCRAPE_DAYS = 7  # Default: scrape next 7 days. Configurable via settings (1-10)
 MSPORT_MIN_DAYS = 7   # MSport needs wider window for coverage (SportyBet/Betgr8 don't filter by date)
 BET9JA_MIN_DAYS = 7   # Bet9ja API is fast, wider window improves merge coverage
 REFRESH_INTERVAL_MINUTES = 5
@@ -199,10 +199,12 @@ async def do_refresh():
         # Run Bet9ja (API) in parallel with Playwright scrapers run sequentially
         # to avoid memory pressure from 3+ concurrent headless browsers
         async def _run_playwright_scrapers():
-            """Run Playwright scrapers one at a time to avoid OOM."""
-            r1 = await safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES, days=SCRAPE_DAYS)
-            r2 = await safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, MSPORT_MIN_DAYS))
-            r3 = await safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES, days=SCRAPE_DAYS)
+            """Run Playwright scrapers in parallel with asyncio.gather."""
+            r1, r2, r3 = await asyncio.gather(
+                safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
+                safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, MSPORT_MIN_DAYS)),
+                safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
+            )
             return [r1, r2, r3]
 
         bet9ja_result, playwright_results = await asyncio.gather(
