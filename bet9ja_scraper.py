@@ -15,9 +15,9 @@ LEAGUE_IDS = {
     "Serie A": 167856,
     "Bundesliga": 180923,
     "Ligue 1": 950503,
-    "Champions League": 180931,
-    "Europa League": 180933,
-    "Conference League": 180935,
+    "Champions League": 1185641,
+    "Europa League": 1185689,
+    "Conference League": 1946188,
 }
 
 HEADERS = {
