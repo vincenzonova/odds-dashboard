@@ -42,7 +42,7 @@ from betslip_checker import (
 
 # Configuration
 SECRET_KEY = "your-secret-key-change-in-production"
-MAX_MATCHES = 100
+MAX_MATCHES = 160
 SCRAPE_DAYS = 2  # Default: scrape next 2 days. Configurable via settings (1-10)
 MSPORT_MIN_DAYS = 7   # MSport needs wider window for coverage (SportyBet/Betgr8 don't filter by date)
 BET9JA_MIN_DAYS = 7   # Bet9ja API is fast, wider window improves merge coverage
