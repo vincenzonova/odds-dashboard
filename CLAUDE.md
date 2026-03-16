@@ -77,6 +77,9 @@ The betslip service (`betslip_service.py`) runs on its own Railway deployment. T
 SQLite DB is ephemeral — it resets on every deploy. Do not build features that depend on
 historical data persisting.
 
+### Staging environment exists for testing
+The `staging` branch deploys to a separate Railway service (stunning-vibrancy). Use it for testing scraper optimizations and risky changes before merging to main. The staging service has reduced scraper wait times (Betgr8: WAIT_SECONDS=3 vs prod's 5, MSport: reduced timeouts). Always test on staging first for scraper changes.
+
 ### Playwright scrapers run SEQUENTIALLY
 SportyBet, MSport, and Betgr8 share a single Playwright browser and run one after another.
 Only Bet9ja (API-based) runs in parallel with them.
