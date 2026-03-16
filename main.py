@@ -104,6 +104,10 @@ users = {
         "password_hash": bcrypt.hashpw(b"paulo2026", bcrypt.gensalt()).decode(),
         "role": "admin",
     },
+    "alessandro": {
+        "password_hash": bcrypt.hashpw(b"alessandro2026", bcrypt.gensalt()).decode(),
+        "role": "admin",
+    },
 }
 
 scheduler = None
