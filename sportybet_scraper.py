@@ -23,6 +23,7 @@ TOURNAMENT_URLS = {
     "Ligue 1":        f"{SPORTYBET_BASE}/sr:category:7/sr:tournament:34",
     "Champions League":f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:7",
     "Europa League":  f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:679",
+    "Conference League":f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:34480",
 }
 
 
