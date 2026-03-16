@@ -81,6 +81,11 @@ historical data persisting.
 SportyBet, MSport, and Betgr8 share a single Playwright browser and run one after another.
 Only Bet9ja (API-based) runs in parallel with them.
 
+
+
+### Bet9ja GROUP IDs are season-specific
+The Bet9ja API uses GROUP IDs to identify leagues. These IDs change between seasons. If European competitions (Champions League, Europa League, Conference League) suddenly return 0 events, the GROUP IDs in `bet9ja_scraper.py` are likely stale and need updating. Use the `GetSports?DISP=0` API endpoint to find current IDs. Current IDs (2025/26 season): CL=1185641, EL=1185689, ECL=1946188.
+
 ---
 
 ## Step 3 — Run Tests
