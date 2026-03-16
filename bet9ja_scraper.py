@@ -100,8 +100,6 @@ async def scrape_bet9ja(max_matches: int = 50, days: int = 2) -> list[dict]:
             print(f"  [Bet9ja] Session init warning: {e}")
 
         for league_name, group_id in LEAGUE_IDS.items():
-            if len(results) >= max_matches:
-                break
 
             params = {
                 "GROUPID": group_id,
@@ -152,9 +150,7 @@ async def scrape_bet9ja(max_matches: int = 50, days: int = 2) -> list[dict]:
                         if parsed:
                             results.append(parsed)
                             added += 1
-                            if len(results) >= max_matches:
-                                break
-
+   
                     print(f"  [Bet9ja] {league_name}: +{added} matches")
 
             except asyncio.TimeoutError:
@@ -165,7 +161,7 @@ async def scrape_bet9ja(max_matches: int = 50, days: int = 2) -> list[dict]:
                 continue
 
     print(f"  [Bet9ja] Done — {len(results)} matches total")
-    return results
+    return results[:max_matches]
 
 
 if __name__ == "__main__":
