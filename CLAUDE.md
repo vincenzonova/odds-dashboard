@@ -7,20 +7,17 @@
 
 ## MANDATORY DEVELOPMENT WORKFLOW
 
-**ALL changes MUST go through staging first, then be promoted to production.**
-
-Every code change MUST follow this 8-step sequence:
+Every code change MUST follow this 7-step sequence:
 
 1. **READ DOCS** → Read relevant `docs/` files before touching any code
 2. **CREATE DOCS** → Write/update documentation for the feature you're about to implement
 3. **IMPLEMENT & TEST** → Make the code change AND write tests for new features
 4. **UPDATE DOCS** → Update all affected documentation to reflect the changes made
 5. **RUN ALL TESTS** → Run `pytest test_main.py -v` and confirm all tests pass
-6. **DEPLOY TO STAGING** → Commit and push to the `staging` branch (Railway auto-deploys to stunning-vibrancy)
-7. **VALIDATE ON STAGING** → Verify the change works on staging (stunning-vibrancy-production-a011.up.railway.app)
-8. **PROMOTE TO PRODUCTION** → Merge staging into main (Railway auto-deploys to odds-dashboard-production)
+6. **DEPLOY** → Commit and push to main (Railway auto-deploys)
+7. **RECHECK** → Verify the deployment works correctly on the live dashboard
 
-**Do NOT skip steps. Do NOT commit if tests fail. Do NOT push directly to main — always go through staging first.**
+**Do NOT skip steps. Do NOT commit if tests fail.**
 
 ### Key Rules
 
@@ -79,15 +76,6 @@ The betslip service (`betslip_service.py`) runs on its own Railway deployment. T
 ### Railway has NO persistent storage
 SQLite DB is ephemeral — it resets on every deploy. Do not build features that depend on
 historical data persisting.
-
-### Staging-first workflow is MANDATORY
-The `staging` branch deploys to a separate Railway service (stunning-vibrancy) in EU West Amsterdam. **ALL changes must be tested on staging before merging to main/production.** This is not optional — it is the required development workflow.
-
-- **Staging URL**: stunning-vibrancy-production-a011.up.railway.app
-- **Production URL**: odds-dashboard-production.up.railway.app
-- **Required env var**: PORT=8000 must be set on the staging Railway service (without it, Railway returns 502)
-- **Speed comparison** (March 2026): Staging scraper wait-time optimizations (Betgr8 WAIT_SECONDS=3, MSport reduced timeouts) showed no meaningful speed improvement. Total cycle time is ~5 minutes on both environments because SportyBet (~5 min) is the bottleneck, and all Playwright scrapers run in parallel via asyncio.gather.
-- Always validate on staging first, then merge staging → main to promote to production.
 
 ### Playwright scrapers run SEQUENTIALLY
 SportyBet, MSport, and Betgr8 share a single Playwright browser and run one after another.
