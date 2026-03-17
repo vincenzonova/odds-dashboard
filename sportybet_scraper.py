@@ -358,7 +358,7 @@ async def _scrape_league_dom_fallback(page, league_name: str, seen: set,
     return results
 
 
-async def scrape_sportybet(max_matches: int = 50) -> list[dict]:
+async def scrape_sportybet(max_matches: int = 50, days: int = 7) -> list[dict]:
     results = []
     seen = set()
 
