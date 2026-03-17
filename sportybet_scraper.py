@@ -288,7 +288,7 @@ async def _scrape_league_vuex(page, league_name: str, url: str, tournament_id: s
         )
     except Exception:
         print(f"  [SportyBet] {league_name}: Vuex store not ready, falling back to DOM")
-        return await_scrape_league_dom_fallback(page, league_name, seen, max_matches, current_count)
+        return await _scrape_league_dom_fallback(page, league_name, seen, max_matches, current_count)
 
     # Extract all data from Vuex store in one call
     data = await page.evaluate(JS_EXTRACT_VUEX, tournament_id)
