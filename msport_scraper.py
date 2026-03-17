@@ -289,7 +289,7 @@ async def _scrape_date_via_api(page, date_str: str, is_today: bool,
     return results
 
 
-async def scrape_msport(max_matches: int = 200) -> list:
+async def scrape_msport(max_matches: int = 200, days: int = 7) -> list:
     """Main entry point for scraping MSport data.
 
     Loads today + next 6 days (full week) to capture upcoming matches.
@@ -320,7 +320,7 @@ async def scrape_msport(max_matches: int = 200) -> list:
 
         # Scrape today + next 6 days
         today = datetime.now()
-        for day_offset in range(7):
+        for day_offset in range(days):
             if len(results) >= max_matches:
                 break
             target_date = today + timedelta(days=day_offset)
