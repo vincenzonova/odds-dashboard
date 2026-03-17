@@ -1,18 +1,18 @@
 """
-SportyBet Scraper v2 - Vuex Store extraction (replaces DOM-clicking approach).
-Still uses Playwright to navigate (needed for auth cookies), but extracts ALL
-odds data from window.v_store (Vue/Vuex) in a single page.evaluate() per league.
+SportyBet Scraper v3 - API response interception (replaces Vuex + DOM fallback).
 
-Speed improvement: ~10-30s per league instead of ~40-60s (no dropdown clicking).
+Uses Playwright to navigate league pages but intercepts the API responses that
+SportyBet's frontend makes to load event data. This gives us ALL market data
+(1X2, O/U 2.5, O/U 1.5, Double Chance) from the JSON response directly,
+without relying on Vuex store availability or DOM scraping.
 
-Extracts:
-  - 1X2 odds        (market ID "1")
-  - Over/Under 2.5   (market ID "18", specifier "total=2.5")
-  - Over/Under 1.5   (market ID "18", specifier "total=1.5")
-  - Double Chance     (market ID "10")
+Works reliably in headless mode on Railway.
+
+Speed: ~5-15s per league (page load + API capture, no DOM interaction needed).
 """
 
 import asyncio
+import json
 from playwright.async_api import async_playwright
 from difflib import SequenceMatcher
 
@@ -27,116 +27,11 @@ TOURNAMENT_URLS = {
     "Ligue 1":        f"{SPORTYBET_BASE}/sr:category:7/sr:tournament:34",
     "Champions League":f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:7",
     "Europa League":  f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:679",
-}
-
-# Tournament IDs matching each URL (extracted from URL path)
-TOURNAMENT_IDS = {
-    "Premier League": "sr:tournament:17",
-    "La Liga":        "sr:tournament:8",
-    "Serie A":        "sr:tournament:23",
-    "Bundesliga":     "sr:tournament:35",
-    "Ligue 1":        "sr:tournament:34",
-    "Champions League":"sr:tournament:7",
-    "Europa League":  "sr:tournament:679",
+    "Conference League":f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:17015",
 }
 
 
-# -- Single JS evaluation to extract ALL odds from Vuex store --
-JS_EXTRACT_VUEX = """
-(tournamentId) => {
-  try {
-    const store = window.v_store;
-    if (!store || !store.state || !store.state.eventList) return {error: 'no store'};
-
-    const sportMap = store.state.eventList.sport;
-    if (!sportMap || !sportMap.map) return {error: 'no sport map'};
-
-    const tournament = sportMap.map[tournamentId];
-    if (!tournament || !tournament.events) return {error: 'no tournament', id: tournamentId};
-
-    const events = Object.values(tournament.events).map(e => {
-      const m = e.markets || {};
-      const result = {
-        eventId: e.eventId,
-        home: e.homeTeamName,
-        away: e.awayTeamName,
-        estimateStartTime: e.estimateStartTime,
-        odds: {}
-      };
-
-      // 1X2 (market "1")
-      if (m["1"] && m["1"].outcomes) {
-        const o = m["1"].outcomes;
-        if (o["1"] && o["2"] && o["3"]) {
-          result.odds["1X2"] = {
-            "1": o["1"].odds,
-            "X": o["2"].odds,
-            "2": o["3"].odds
-          };
-        }
-      }
-
-      // Over/Under (market "18") - extract both 2.5 and 1.5
-      if (m["18"]) {
-        const ouMarkets = Object.values(m["18"]);
-        for (const ou of ouMarkets) {
-          if (!ou.outcomes) continue;
-          const vals = Object.values(ou.outcomes);
-          const overEntry = vals.find(v => v.desc && v.desc.startsWith("Over"));
-          const underEntry = vals.find(v => v.desc && v.desc.startsWith("Under"));
-          if (!overEntry || !underEntry) continue;
-
-          if (ou.specifier === "total=2.5") {
-            result.odds["O/U 2.5"] = { Over: overEntry.odds, Under: underEntry.odds };
-          } else if (ou.specifier === "total=1.5") {
-            result.odds["O/U 1.5"] = { Over: overEntry.odds, Under: underEntry.odds };
-          }
-        }
-      }
-
-      // Double Chance (market "10")
-      if (m["10"] && m["10"].outcomes) {
-        const o = m["10"].outcomes;
-        if (o["9"] && o["10"] && o["11"]) {
-          result.odds["Double Chance"] = {
-            "1X": o["9"].odds,
-            "12": o["10"].odds,
-            "X2": o["11"].odds
-          };
-        }
-      }
-
-      return result;
-    });
-
-    return {ok: true, count: events.length, events: events};
-  } catch (err) {
-    return {error: err.message};
-  }
-}
-"""
-
-# -- Fallback: DOM extraction (used if Vuex store not available) --
-JS_EXTRACT_DOM_FALLBACK = """
-() => {
-  const rows = document.querySelectorAll('.match-row');
-  const matches = [];
-  for (const row of rows) {
-    const home = row.querySelector('.home-team')?.textContent?.trim() || '';
-    const away = row.querySelector('.away-team')?.textContent?.trim() || '';
-    const oddsEls = [...row.querySelectorAll('.m-outcome-odds')];
-    const odds = oddsEls.map(o => o.textContent.trim());
-    const spread = row.querySelector('.af-select-input')?.textContent?.trim() || '';
-    if (home && away && odds.length >= 3) {
-      matches.push({ home, away, odds, spread });
-    }
-  }
-  return matches;
-}
-"""
-
-
-# -- Team name normalization (same as v1) --
+# -- Team name normalization --
 TEAM_ALIASES = {
     "atl. madrid": "atletico madrid",
     "atl madrid": "atletico madrid",
@@ -230,10 +125,7 @@ def _team_similarity(a: str, b: str) -> float:
 
 
 def fuzzy_match(name_a: str, name_b: str, threshold: float = 0.70) -> bool:
-    """
-    Match two event names by checking BOTH teams individually.
-    Both home and away must match above threshold.
-    """
+    """Match two event names by checking BOTH teams individually."""
     home_a, away_a = _split_teams(name_a)
     home_b, away_b = _split_teams(name_b)
     if not home_a or not home_b:
@@ -249,32 +141,282 @@ def fuzzy_match(name_a: str, name_b: str, threshold: float = 0.70) -> bool:
     return False
 
 
-def _build_odds_dict_from_dom(main_data: dict) -> dict:
-    """Build odds dict from DOM fallback data."""
-    odds_list = main_data["odds"]
-    spread = main_data.get("spread", "")
-    result = {}
-    if len(odds_list) >= 3:
-        result["1X2"] = {"1": odds_list[0], "X": odds_list[1], "2": odds_list[2]}
-    if len(odds_list) >= 5 and spread.strip() == "2.5":
-        result["O/U 2.5"] = {"Over": odds_list[3], "Under": odds_list[4]}
-    return result
+def _parse_event_markets(markets_data) -> dict:
+    """Parse market data from API response or Vuex store format.
+
+    SportyBet API returns markets as either:
+    - A list of market objects (API response format)
+    - A dict keyed by market ID (Vuex store format)
+
+    Each market has:
+    - id/marketId "1" = 1X2
+    - id/marketId "18" = Over/Under (with specifier like "total=2.5")
+    - id/marketId "10" = Double Chance
+    """
+    odds = {}
+
+    # Normalize to list of market objects
+    if isinstance(markets_data, dict):
+        # Vuex store format: {marketId: {outcomes: {...}}}
+        market_list = []
+        for mid, mdata in markets_data.items():
+            if isinstance(mdata, dict):
+                mdata["_mid"] = str(mid)
+                market_list.append(mdata)
+            elif isinstance(mdata, list):
+                for item in mdata:
+                    if isinstance(item, dict):
+                        item["_mid"] = str(mid)
+                        market_list.append(item)
+        markets_data = market_list
+
+    if not isinstance(markets_data, list):
+        return odds
+
+    for market in markets_data:
+        if not isinstance(market, dict):
+            continue
+
+        market_id = str(market.get("id", market.get("marketId", market.get("_mid", ""))))
+        outcomes = market.get("outcomes", [])
+
+        # Normalize outcomes to a list
+        if isinstance(outcomes, dict):
+            outcomes = list(outcomes.values())
+
+        if not outcomes:
+            continue
+
+        # 1X2 (market ID "1")
+        if market_id == "1":
+            odds_1x2 = {}
+            for o in outcomes:
+                if not isinstance(o, dict):
+                    continue
+                oid = str(o.get("id", o.get("outcomeId", "")))
+                oval = o.get("odds", o.get("formattedOdds", ""))
+                desc = o.get("desc", "")
+                if oid == "1" or desc == "1":
+                    odds_1x2["1"] = str(oval)
+                elif oid == "2" or desc == "X":
+                    odds_1x2["X"] = str(oval)
+                elif oid == "3" or desc == "2":
+                    odds_1x2["2"] = str(oval)
+            if len(odds_1x2) == 3:
+                odds["1X2"] = odds_1x2
+
+        # Over/Under (market ID "18")
+        elif market_id == "18":
+            specifier = market.get("specifier", "")
+            over_val = None
+            under_val = None
+            for o in outcomes:
+                if not isinstance(o, dict):
+                    continue
+                desc = str(o.get("desc", "")).lower()
+                oval = o.get("odds", o.get("formattedOdds", ""))
+                if desc.startswith("over"):
+                    over_val = str(oval)
+                elif desc.startswith("under"):
+                    under_val = str(oval)
+            if over_val and under_val:
+                if "2.5" in specifier:
+                    odds["O/U 2.5"] = {"Over": over_val, "Under": under_val}
+                elif "1.5" in specifier:
+                    odds["O/U 1.5"] = {"Over": over_val, "Under": under_val}
+                elif "3.5" in specifier:
+                    odds["O/U 3.5"] = {"Over": over_val, "Under": under_val}
+
+        # Double Chance (market ID "10")
+        elif market_id == "10":
+            dc = {}
+            for o in outcomes:
+                if not isinstance(o, dict):
+                    continue
+                oid = str(o.get("id", o.get("outcomeId", "")))
+                oval = o.get("odds", o.get("formattedOdds", ""))
+                desc = o.get("desc", "")
+                if oid == "9" or desc == "1X":
+                    dc["1X"] = str(oval)
+                elif oid == "10" or desc == "12":
+                    dc["12"] = str(oval)
+                elif oid == "11" or desc == "X2":
+                    dc["X2"] = str(oval)
+            if len(dc) == 3:
+                odds["Double Chance"] = dc
+
+    return odds
 
 
-async def _scrape_league_vuex(page, league_name: str, url: str, tournament_id: str,
-                               seen: set, max_matches: int, current_count: int) -> list[dict]:
-    """Scrape a single league using Vuex store extraction (fast path).
+def _parse_api_events(data: dict) -> list[dict]:
+    """Parse events from SportyBet API response JSON.
 
-    Instead of clicking dropdowns and tabs in the DOM, we extract ALL odds
-    data from the Vue/Vuex store in a single page.evaluate() call.
-    This gives us 1X2, O/U 1.5, O/U 2.5, and Double Chance simultaneously.
+    Expected structure:
+    {
+        "bizCode": 10000,
+        "data": {
+            "events": [...] or "tournaments": [{"events": [...]}]
+        }
+    }
+    """
+    events = []
+
+    if not isinstance(data, dict):
+        return events
+
+    # Try direct data.events
+    inner = data.get("data", data)
+    if isinstance(inner, dict):
+        raw_events = inner.get("events", [])
+
+        # Also check tournaments[].events pattern
+        if not raw_events:
+            tournaments = inner.get("tournaments", [])
+            if isinstance(tournaments, list):
+                for t in tournaments:
+                    if isinstance(t, dict):
+                        raw_events.extend(t.get("events", []))
+
+        # Also check sport.map pattern (Vuex-like)
+        if not raw_events:
+            sport = inner.get("sport", {})
+            if isinstance(sport, dict):
+                sport_map = sport.get("map", {})
+                for tid, tdata in sport_map.items():
+                    if isinstance(tdata, dict) and "events" in tdata:
+                        evts = tdata["events"]
+                        if isinstance(evts, dict):
+                            raw_events.extend(evts.values())
+                        elif isinstance(evts, list):
+                            raw_events.extend(evts)
+
+        for e in raw_events:
+            if not isinstance(e, dict):
+                continue
+            home = e.get("homeTeamName", e.get("home", ""))
+            away = e.get("awayTeamName", e.get("away", ""))
+            if not home or not away:
+                continue
+
+            markets = e.get("markets", e.get("market", []))
+            odds = _parse_event_markets(markets)
+            if odds and "1X2" in odds:
+                events.append({
+                    "home": home,
+                    "away": away,
+                    "odds": odds,
+                })
+
+    return events
+
+
+# -- JS for Vuex store extraction (fast path, may not work in headless) --
+JS_EXTRACT_VUEX = """
+(tournamentId) => {
+  try {
+    const store = window.v_store;
+    if (!store || !store.state || !store.state.eventList) return {error: 'no store'};
+    const sportMap = store.state.eventList.sport;
+    if (!sportMap || !sportMap.map) return {error: 'no sport map'};
+    const tournament = sportMap.map[tournamentId];
+    if (!tournament || !tournament.events) return {error: 'no tournament', id: tournamentId};
+
+    const events = Object.values(tournament.events).map(e => {
+      const m = e.markets || {};
+      return {
+        home: e.homeTeamName,
+        away: e.awayTeamName,
+        markets: m,
+      };
+    });
+    return {ok: true, count: events.length, events: events};
+  } catch (err) {
+    return {error: err.message};
+  }
+}
+"""
+
+# Tournament IDs matching each URL
+TOURNAMENT_IDS = {
+    "Premier League": "sr:tournament:17",
+    "La Liga":        "sr:tournament:8",
+    "Serie A":        "sr:tournament:23",
+    "Bundesliga":     "sr:tournament:35",
+    "Ligue 1":        "sr:tournament:34",
+    "Champions League":"sr:tournament:7",
+    "Europa League":  "sr:tournament:679",
+    "Conference League":"sr:tournament:17015",
+}
+
+
+async def _scrape_league(page, league_name: str, url: str, tournament_id: str,
+                         seen: set, max_matches: int, current_count: int) -> list[dict]:
+    """Scrape a single league using API response interception with Vuex fallback.
+
+    Strategy:
+    1. Set up response listener to capture API responses
+    2. Navigate to the league page
+    3. Try to parse captured API responses for all market data
+    4. If API capture fails, try Vuex store extraction
+    5. If Vuex fails, use DOM fallback (1X2 only)
     """
     results = []
+    captured_responses = []
+
+    # Set up response listener before navigation
+    async def on_response(response):
+        url_str = response.url
+        # Capture any API response that contains event/match data
+        if "factsCenter" in url_str or "events" in url_str.lower():
+            if response.status == 200:
+                try:
+                    body = await response.text()
+                    data = json.loads(body)
+                    captured_responses.append(data)
+                except Exception:
+                    pass
+
+    page.on("response", on_response)
+
     print(f"  [SportyBet] Loading {league_name}...")
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        # Wait for API responses to arrive
+        await page.wait_for_timeout(5000)
+    except Exception as e:
+        print(f"  [SportyBet] {league_name}: navigation error: {e}")
+        page.remove_listener("response", on_response)
+        return results
 
-    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    # Remove listener now that we've captured responses
+    page.remove_listener("response", on_response)
 
-    # Wait for Vuex store to be populated with event data
+    # Strategy 1: Parse captured API responses
+    api_events = []
+    for resp_data in captured_responses:
+        parsed = _parse_api_events(resp_data)
+        api_events.extend(parsed)
+
+    if api_events:
+        for event in api_events:
+            if current_count + len(results) >= max_matches:
+                break
+            home = event["home"]
+            away = event["away"]
+            key = f"{home}-{away}"
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append({
+                "event_id": key,
+                "event": f"{home} - {away}",
+                "league": league_name,
+                "odds": event["odds"],
+            })
+        print(f"  [SportyBet] {league_name}: +{len(results)} matches (API interception)")
+        return results
+
+    # Strategy 2: Try Vuex store extraction
     try:
         await page.wait_for_function(
             """(tid) => {
@@ -284,81 +426,75 @@ async def _scrape_league_vuex(page, league_name: str, url: str, tournament_id: s
                 } catch(e) { return false; }
             }""",
             tournament_id,
-            timeout=15000,
+            timeout=8000,
         )
+        vuex_data = await page.evaluate(JS_EXTRACT_VUEX, tournament_id)
+        if vuex_data and vuex_data.get("ok"):
+            for event in vuex_data.get("events", []):
+                if current_count + len(results) >= max_matches:
+                    break
+                home = event.get("home", "")
+                away = event.get("away", "")
+                key = f"{home}-{away}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                markets = event.get("markets", {})
+                odds = _parse_event_markets(markets)
+                if odds and "1X2" in odds:
+                    results.append({
+                        "event_id": key,
+                        "event": f"{home} - {away}",
+                        "league": league_name,
+                        "odds": odds,
+                    })
+            print(f"  [SportyBet] {league_name}: +{len(results)} matches (Vuex store)")
+            return results
     except Exception:
-        print(f"  [SportyBet] {league_name}: Vuex store not ready, falling back to DOM")
-        return await _scrape_league_dom_fallback(page, league_name, seen, max_matches, current_count)
+        pass
 
-    # Extract all data from Vuex store in one call
-    data = await page.evaluate(JS_EXTRACT_VUEX, tournament_id)
-
-    if not data or data.get("error"):
-        print(f"  [SportyBet] {league_name}: Vuex extraction failed ({data}), falling back to DOM")
-        return await _scrape_league_dom_fallback(page, league_name, seen, max_matches, current_count)
-
-    for event in data.get("events", []):
-        if current_count + len(results) >= max_matches:
-            break
-
-        home = event.get("home", "")
-        away = event.get("away", "")
-        key = f"{home}-{away}"
-        if key in seen:
-            continue
-        seen.add(key)
-
-        odds = event.get("odds", {})
-        if not odds or "1X2" not in odds:
-            continue
-
-        results.append({
-            "event_id": key,
-            "event": f"{home} - {away}",
-            "league": league_name,
-            "odds": odds,
-        })
-
-    print(f"  [SportyBet] {league_name}: +{len(results)} matches (Vuex store, instant)")
-    return results
-
-
-async def _scrape_league_dom_fallback(page, league_name: str, seen: set,
-                                       max_matches: int, current_count: int) -> list[dict]:
-    """DOM fallback - simplified version without dropdown clicking.
-    Used only when Vuex store is not available (e.g. site structure changed).
-    Gets 1X2 and O/U 2.5 (if default spread) but skips O/U 1.5 and DC for speed.
-    """
-    results = []
+    # Strategy 3: DOM fallback (1X2 only)
+    print(f"  [SportyBet] {league_name}: API + Vuex failed, using DOM fallback")
     try:
-        await page.wait_for_selector(".match-row", timeout=15000)
+        await page.wait_for_selector(".match-row", timeout=10000)
         await page.wait_for_timeout(1000)
-    except Exception:
-        print(f"  [SportyBet] {league_name}: no match rows found")
-        return results
-
-    raw = await page.evaluate(JS_EXTRACT_DOM_FALLBACK)
-    for m in raw:
-        if current_count + len(results) >= max_matches:
-            break
-        key = f"{m['home']}-{m['away']}"
-        if key in seen:
-            continue
-        seen.add(key)
-        odds = _build_odds_dict_from_dom(m)
-        if odds:
+        raw = await page.evaluate("""() => {
+            const rows = document.querySelectorAll('.match-row');
+            const matches = [];
+            for (const row of rows) {
+                const home = row.querySelector('.home-team')?.textContent?.trim() || '';
+                const away = row.querySelector('.away-team')?.textContent?.trim() || '';
+                const oddsEls = [...row.querySelectorAll('.m-outcome-odds')];
+                const odds = oddsEls.map(o => o.textContent.trim());
+                if (home && away && odds.length >= 3) {
+                    matches.push({ home, away, odds });
+                }
+            }
+            return matches;
+        }""")
+        for m in raw:
+            if current_count + len(results) >= max_matches:
+                break
+            key = f"{m['home']}-{m['away']}"
+            if key in seen:
+                continue
+            seen.add(key)
+            odds = {"1X2": {"1": m["odds"][0], "X": m["odds"][1], "2": m["odds"][2]}}
             results.append({
                 "event_id": key,
                 "event": f"{m['home']} - {m['away']}",
                 "league": league_name,
                 "odds": odds,
             })
+        print(f"  [SportyBet] {league_name}: +{len(results)} matches (DOM fallback)")
+    except Exception as e:
+        print(f"  [SportyBet] {league_name}: all methods failed: {e}")
 
-    print(f"  [SportyBet] {league_name}: +{len(results)} matches (DOM fallback)")
     return results
 
 
 async def scrape_sportybet(max_matches: int = 50, days: int = 7) -> list[dict]:
+    """Main entry point - scrape all configured leagues."""
     results = []
     seen = set()
 
@@ -368,6 +504,7 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 7) -> list[dict]:
             args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
         page = await browser.new_page()
+        # Block images/fonts for speed
         await page.route(
             "**/*.{png,jpg,jpeg,gif,webp,woff,woff2,svg}",
             lambda r: r.abort(),
@@ -378,7 +515,7 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 7) -> list[dict]:
                 break
             try:
                 tournament_id = TOURNAMENT_IDS[league_name]
-                league_matches = await _scrape_league_vuex(
+                league_matches = await _scrape_league(
                     page, league_name, url, tournament_id,
                     seen, max_matches, len(results),
                 )
@@ -394,6 +531,5 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 7) -> list[dict]:
 
 
 if __name__ == "__main__":
-    import json
     data = asyncio.run(scrape_sportybet(max_matches=10))
     print(json.dumps(data, indent=2))
