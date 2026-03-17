@@ -1,35 +1,43 @@
 """
-SportyBet Scraper v3.1 - API response interception + direct API calls for all markets.
+SportyBet Scraper v4 - Pure API (aiohttp, no Playwright).
 
-Uses Playwright to navigate league pages and intercepts API responses.
-Then makes DIRECT API calls to SportyBet's endpoint with marketId=1,10,18
-to fetch 1X2, Double Chance, and Over/Under odds in a single request.
+Calls SportyBet's REST API directly with aiohttp:
+  1. pcEvents endpoint for each league (gets 1X2)
+  2. pcEventDetail per event for DC + O/U enrichment (concurrent)
 
-Falls back to: Vuex store > DOM fallback (1X2 only).
-
-Works reliably in headless mode on Railway.
+No browser needed â fast, lightweight, ~10-15s total.
 """
 
 import asyncio
+import aiohttp
 import json
-import re
-from playwright.async_api import async_playwright
+import time
 from difflib import SequenceMatcher
 
 
-SPORTYBET_BASE = "https://www.sportybet.com/ng/sport/football"
+SPORTYBET_API = "https://www.sportybet.com/api/ng/factsCenter"
 
-TOURNAMENT_URLS = {
-    "Premier League": f"{SPORTYBET_BASE}/sr:category:1/sr:tournament:17",
-    "La Liga":        f"{SPORTYBET_BASE}/sr:category:32/sr:tournament:8",
-    "Serie A":        f"{SPORTYBET_BASE}/sr:category:31/sr:tournament:23",
-    "Bundesliga":     f"{SPORTYBET_BASE}/sr:category:30/sr:tournament:35",
-    "Ligue 1":        f"{SPORTYBET_BASE}/sr:category:7/sr:tournament:34",
-    "Champions League":f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:7",
-    "Europa League":  f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:679",
-    "Conference League":f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:17015",
+# Tournament IDs for each league
+TOURNAMENT_IDS = {
+    "Premier League": "sr:tournament:17",
+    "La Liga":        "sr:tournament:8",
+    "Serie A":        "sr:tournament:23",
+    "Bundesliga":     "sr:tournament:35",
+    "Ligue 1":        "sr:tournament:34",
+    "Champions League":"sr:tournament:7",
+    "Europa League":  "sr:tournament:679",
+    "Conference League":"sr:tournament:17015",
 }
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.sportybet.com/ng/sport/football",
+    "Origin": "https://www.sportybet.com",
+    "sec-ch-ua": '"Chromium";v="120", "Google Chrome";v="120"',
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+}
 
 # -- Team name normalization --
 TEAM_ALIASES = {
@@ -142,22 +150,17 @@ def fuzzy_match(name_a: str, name_b: str, threshold: float = 0.70) -> bool:
 
 
 def _parse_event_markets(markets_data) -> dict:
-    """Parse market data from API response or Vuex store format.
-
-    SportyBet API returns markets as either:
-    - A list of market objects (API response format)
-    - A dict keyed by market ID (Vuex store format)
+    """Parse market data from API response format.
 
     Each market has:
-    - id/marketId "1" = 1X2
-    - id/marketId "18" = Over/Under (with specifier like "total=2.5")
-    - id/marketId "10" = Double Chance
+    - id "1" = 1X2
+    - id "18" = Over/Under (with specifier like "total=2.5")
+    - id "10" = Double Chance
     """
     odds = {}
 
     # Normalize to list of market objects
     if isinstance(markets_data, dict):
-        # Vuex store format: {marketId: {outcomes: {...}}}
         market_list = []
         for mid, mdata in markets_data.items():
             if isinstance(mdata, dict):
@@ -180,7 +183,6 @@ def _parse_event_markets(markets_data) -> dict:
         market_id = str(market.get("id", market.get("marketId", market.get("_mid", ""))))
         outcomes = market.get("outcomes", [])
 
-        # Normalize outcomes to a list
         if isinstance(outcomes, dict):
             outcomes = list(outcomes.values())
 
@@ -249,46 +251,22 @@ def _parse_event_markets(markets_data) -> dict:
 
 
 def _parse_api_events(data: dict) -> list[dict]:
-    """Parse events from SportyBet API response JSON.
-
-    Expected structure:
-    {
-        "bizCode": 10000,
-        "data": {
-            "events": [...] or "tournaments": [{"events": [...]}]
-        }
-    }
-    """
+    """Parse events from SportyBet API response JSON."""
     events = []
 
     if not isinstance(data, dict):
         return events
 
-    # Try direct data.events
     inner = data.get("data", data)
     if isinstance(inner, dict):
         raw_events = inner.get("events", [])
 
-        # Also check tournaments[].events pattern
         if not raw_events:
             tournaments = inner.get("tournaments", [])
             if isinstance(tournaments, list):
                 for t in tournaments:
                     if isinstance(t, dict):
                         raw_events.extend(t.get("events", []))
-
-        # Also check sport.map pattern (Vuex-like)
-        if not raw_events:
-            sport = inner.get("sport", {})
-            if isinstance(sport, dict):
-                sport_map = sport.get("map", {})
-                for tid, tdata in sport_map.items():
-                    if isinstance(tdata, dict) and "events" in tdata:
-                        evts = tdata["events"]
-                        if isinstance(evts, dict):
-                            raw_events.extend(evts.values())
-                        elif isinstance(evts, list):
-                            raw_events.extend(evts)
 
         for e in raw_events:
             if not isinstance(e, dict):
@@ -312,384 +290,167 @@ def _parse_api_events(data: dict) -> list[dict]:
     return events
 
 
-# -- JS for Vuex store extraction (fast path, may not work in headless) --
-JS_EXTRACT_VUEX = """
-(tournamentId) => {
-  try {
-    const store = window.v_store;
-    if (!store || !store.state || !store.state.eventList) return {error: 'no store'};
-    const sportMap = store.state.eventList.sport;
-    if (!sportMap || !sportMap.map) return {error: 'no sport map'};
-    const tournament = sportMap.map[tournamentId];
-    if (!tournament || !tournament.events) return {error: 'no tournament', id: tournamentId};
-
-    const events = Object.values(tournament.events).map(e => {
-      const m = e.markets || {};
-      return {
-        home: e.homeTeamName,
-        away: e.awayTeamName,
-        markets: m,
-      };
-    });
-    return {ok: true, count: events.length, events: events};
-  } catch (err) {
-    return {error: err.message};
-  }
-}
-"""
-
-# Tournament IDs matching each URL
-TOURNAMENT_IDS = {
-    "Premier League": "sr:tournament:17",
-    "La Liga":        "sr:tournament:8",
-    "Serie A":        "sr:tournament:23",
-    "Bundesliga":     "sr:tournament:35",
-    "Ligue 1":        "sr:tournament:34",
-    "Champions League":"sr:tournament:7",
-    "Europa League":  "sr:tournament:679",
-    "Conference League":"sr:tournament:17015",
-}
-
-
-async def _enrich_event_markets(page, event_id: str, event_odds: dict) -> dict:
-    """Fetch additional markets for a single event if only 1X2 was captured.
-
-    Tries the eventDetail endpoint to get Double Chance and O/U.
-    Returns the enriched odds dict.
-    """
-    if "Double Chance" in event_odds and "O/U 2.5" in event_odds:
-        return event_odds  # Already has all markets
+async def _fetch_league_events(session: aiohttp.ClientSession, league_name: str,
+                                tournament_id: str) -> list[dict]:
+    """Fetch events for a single league via pcEvents API."""
+    tid_encoded = tournament_id.replace(":", "%3A")
+    url = (
+        f"{SPORTYBET_API}/pcEvents"
+        f"?_t={int(time.time() * 1000)}"
+        f"&sportId=sr%3Asport%3A1"
+        f"&tournamentId={tid_encoded}"
+        f"&marketId=1%2C10%2C18"
+        f"&pageSize=100&pageNum=1"
+    )
 
     try:
-        result = await page.evaluate(f"""
-            async () => {{
-                try {{
-                    const resp = await fetch('/api/ng/factsCenter/pcEventDetail?_t=' + Date.now() + '&eventId={event_id}&marketId=1%2C10%2C18');
-                    if (!resp.ok) return null;
-                    return await resp.json();
-                }} catch(e) {{ return null; }}
-            }}
-        """)
-        if result and isinstance(result, dict):
-            inner = result.get("data", result)
-            if isinstance(inner, dict):
-                markets = inner.get("markets", inner.get("market", []))
-                enriched = _parse_event_markets(markets)
-                # Merge: keep existing odds, add new ones
-                for k, v in enriched.items():
-                    if k not in event_odds:
-                        event_odds[k] = v
-    except Exception:
-        pass
-    return event_odds
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                print(f"  [SportyBet] {league_name}: HTTP {resp.status}")
+                return []
+            data = await resp.json()
 
-
-async def _direct_api_fetch(page, tournament_id: str, league_name: str) -> list[dict]:
-    """Make direct API calls to SportyBet endpoint requesting ALL markets.
-
-    Tries multiple known endpoint patterns with marketId=1,10,18 to get
-    1X2, Double Chance, and Over/Under in one request.
-    """
-    # Known SportyBet API endpoint patterns
-    endpoints = [
-        # Pattern 1: pcEvents with tournament filter and market IDs
-        f"/api/ng/factsCenter/pcEvents?_t={int(asyncio.get_event_loop().time()*1000)}"
-        f"&sportId=sr%3Asport%3A1&tournamentId={tournament_id.replace(':', '%3A')}"
-        f"&marketId=1%2C10%2C18&pageSize=100&pageNum=1",
-        # Pattern 2: without pagination
-        f"/api/ng/factsCenter/pcEvents?_t={int(asyncio.get_event_loop().time()*1000)}"
-        f"&sportId=sr%3Asport%3A1&tournamentId={tournament_id.replace(':', '%3A')}"
-        f"&marketId=1%2C10%2C18",
-        # Pattern 3: tournament events endpoint
-        f"/api/ng/factsCenter/tournamentEvents?_t={int(asyncio.get_event_loop().time()*1000)}"
-        f"&sportId=sr%3Asport%3A1&tournamentId={tournament_id.replace(':', '%3A')}"
-        f"&marketId=1%2C10%2C18",
-    ]
-
-    for endpoint in endpoints:
-        try:
-            result = await page.evaluate(f"""
-                async () => {{
-                    try {{
-                        const resp = await fetch('{endpoint}');
-                        if (!resp.ok) return {{error: 'status ' + resp.status}};
-                        const data = await resp.json();
-                        return data;
-                    }} catch(e) {{
-                        return {{error: e.message}};
-                    }}
-                }}
-            """)
-
-            if not isinstance(result, dict) or result.get("error"):
-                err = result.get("error", "unknown") if isinstance(result, dict) else str(result)
-                print(f"  [SportyBet] {league_name}: direct API endpoint failed: {err}")
-                continue
-
-            # Check bizCode for success
-            biz_code = result.get("bizCode")
+            biz_code = data.get("bizCode")
             if biz_code and biz_code != 10000:
-                print(f"  [SportyBet] {league_name}: direct API bizCode={biz_code}")
-                continue
+                print(f"  [SportyBet] {league_name}: bizCode={biz_code}")
+                return []
 
-            events = _parse_api_events(result)
+            events = _parse_api_events(data)
             if events:
                 # Check if we got more than just 1X2
                 has_extra = any(
                     "Double Chance" in e["odds"] or "O/U 2.5" in e["odds"]
                     for e in events[:5]
                 )
-                if has_extra:
-                    print(f"  [SportyBet] {league_name}: direct API SUCCESS with DC/OU markets!")
-                else:
-                    print(f"  [SportyBet] {league_name}: direct API got events but only 1X2")
-                return events
-        except Exception as e:
-            print(f"  [SportyBet] {league_name}: direct API exception: {e}")
-            continue
+                market_info = "with DC/O/U" if has_extra else "1X2 only"
+                print(f"  [SportyBet] {league_name}: {len(events)} events ({market_info})")
+            else:
+                print(f"  [SportyBet] {league_name}: 0 events from pcEvents")
+            return events
 
-    return []
-
-
-async def _scrape_league(page, league_name: str, url: str, tournament_id: str,
-                         seen: set, max_matches: int, current_count: int) -> list[dict]:
-    """Scrape a single league using direct API calls with interception fallback.
-
-    Strategy:
-    1. Set up response listener to capture API URLs/responses
-    2. Navigate to the league page
-    3. Try direct API call with marketId=1,10,18 for ALL markets
-    4. If direct call fails, parse captured API responses
-    5. If API capture fails, try Vuex store extraction
-    6. If Vuex fails, use DOM fallback (1X2 only)
-    """
-    results = []
-    captured_responses = []
-    captured_urls = []
-
-    # Set up response listener before navigation
-    async def on_response(response):
-        url_str = response.url
-        # Capture any API response that contains event/match data
-        if "factsCenter" in url_str or "/events" in url_str.lower():
-            captured_urls.append(url_str)
-            if response.status == 200:
-                try:
-                    body = await response.text()
-                    data = json.loads(body)
-                    captured_responses.append({"url": url_str, "data": data})
-                except Exception:
-                    pass
-
-    page.on("response", on_response)
-
-    print(f"  [SportyBet] Loading {league_name}...")
-    try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        # Wait for API responses to arrive
-        await page.wait_for_timeout(5000)
+    except asyncio.TimeoutError:
+        print(f"  [SportyBet] {league_name}: timeout")
+        return []
     except Exception as e:
-        print(f"  [SportyBet] {league_name}: navigation error: {e}")
-        page.remove_listener("response", on_response)
-        return results
+        print(f"  [SportyBet] {league_name} error: {e}")
+        return []
 
-    # Remove listener now that we've captured responses
-    page.remove_listener("response", on_response)
 
-    # Log captured URLs for debugging
-    print(f"  [SportyBet] {league_name}: captured {len(captured_urls)} API URLs")
-    for u in captured_urls[:5]:
-        print(f"    -> {u[:150]}")
+async def _enrich_event(session: aiohttp.ClientSession, event: dict) -> dict:
+    """Enrich a single event with DC/O/U via pcEventDetail API."""
+    event_id = event.get("event_id", "")
+    if not event_id:
+        return event
 
-    # Log response structure for debugging
-    for cr in captured_responses[:2]:
-        data = cr["data"]
-        if isinstance(data, dict):
+    # Skip if already has all markets
+    if "Double Chance" in event["odds"] and "O/U 2.5" in event["odds"]:
+        return event
+
+    url = (
+        f"{SPORTYBET_API}/pcEventDetail"
+        f"?_t={int(time.time() * 1000)}"
+        f"&eventId={event_id}"
+        f"&marketId=1%2C10%2C18"
+    )
+
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status != 200:
+                return event
+            data = await resp.json()
+
+            if not isinstance(data, dict) or data.get("bizCode", 10000) != 10000:
+                return event
+
             inner = data.get("data", data)
             if isinstance(inner, dict):
-                # Check if events exist and what markets they have
-                raw_events = inner.get("events", [])
-                if not raw_events:
-                    tournaments = inner.get("tournaments", [])
-                    if isinstance(tournaments, list):
-                        for t in tournaments:
-                            if isinstance(t, dict):
-                                raw_events.extend(t.get("events", []))
-                if raw_events and isinstance(raw_events[0], dict):
-                    sample = raw_events[0]
-                    markets = sample.get("markets", sample.get("market", []))
-                    market_ids = []
-                    if isinstance(markets, list):
-                        market_ids = [str(m.get("id", m.get("marketId", "?"))) for m in markets if isinstance(m, dict)]
-                    elif isinstance(markets, dict):
-                        market_ids = list(markets.keys())
-                    print(f"  [SportyBet] {league_name}: {len(raw_events)} events, sample market IDs: {market_ids[:10]}")
+                markets = inner.get("markets", inner.get("market", []))
+                enriched = _parse_event_markets(markets)
+                for k, v in enriched.items():
+                    if k not in event["odds"]:
+                        event["odds"][k] = v
 
-    # Strategy 1: Direct API call with ALL markets (1=1X2, 10=DC, 18=O/U)
-    api_events = []
-    try:
-        direct_result = await _direct_api_fetch(page, tournament_id, league_name)
-        if direct_result:
-            api_events = direct_result
-            print(f"  [SportyBet] {league_name}: direct API got {len(api_events)} events with all markets")
-    except Exception as e:
-        print(f"  [SportyBet] {league_name}: direct API failed: {e}")
-
-    # Strategy 2: Parse captured API responses (from page load interception)
-    if not api_events:
-        for cr in captured_responses:
-            parsed = _parse_api_events(cr["data"])
-            api_events.extend(parsed)
-        if api_events:
-            print(f"  [SportyBet] {league_name}: intercepted API got {len(api_events)} events")
-
-    if api_events:
-        # Check if events only have 1X2 â if so, try enriching with per-event detail calls
-        only_1x2 = all(
-            set(e["odds"].keys()) == {"1X2"} for e in api_events[:5]
-        )
-        if only_1x2 and len(api_events) <= 20:
-            print(f"  [SportyBet] {league_name}: only 1X2 found, trying per-event enrichment...")
-            enriched_count = 0
-            for event in api_events:
-                event_id = event.get("event_id", f"{event['home']}-{event['away']}")
-                event["odds"] = await _enrich_event_markets(page, event_id, event["odds"])
-                if "Double Chance" in event["odds"] or "O/U 2.5" in event["odds"]:
-                    enriched_count += 1
-            print(f"  [SportyBet] {league_name}: enriched {enriched_count}/{len(api_events)} events")
-
-        for event in api_events:
-            if current_count + len(results) >= max_matches:
-                break
-            home = event["home"]
-            away = event["away"]
-            key = f"{home}-{away}"
-            if key in seen:
-                continue
-            seen.add(key)
-            # Log market types found for first few events
-            if len(results) < 2:
-                print(f"  [SportyBet] {league_name}: {home} v {away} markets: {list(event['odds'].keys())}")
-            results.append({
-                "event_id": key,
-                "event": f"{home} - {away}",
-                "league": league_name,
-                "odds": event["odds"],
-            })
-        print(f"  [SportyBet] {league_name}: +{len(results)} matches (API)")
-        return results
-
-    # Strategy 3: Try Vuex store extraction
-    try:
-        await page.wait_for_function(
-            """(tid) => {
-                try {
-                    const m = window.v_store.state.eventList.sport.map[tid];
-                    return m && m.events && Object.keys(m.events).length > 0;
-                } catch(e) { return false; }
-            }""",
-            tournament_id,
-            timeout=8000,
-        )
-        vuex_data = await page.evaluate(JS_EXTRACT_VUEX, tournament_id)
-        if vuex_data and vuex_data.get("ok"):
-            for event in vuex_data.get("events", []):
-                if current_count + len(results) >= max_matches:
-                    break
-                home = event.get("home", "")
-                away = event.get("away", "")
-                key = f"{home}-{away}"
-                if key in seen:
-                    continue
-                seen.add(key)
-                markets = event.get("markets", {})
-                odds = _parse_event_markets(markets)
-                if odds and "1X2" in odds:
-                    results.append({
-                        "event_id": key,
-                        "event": f"{home} - {away}",
-                        "league": league_name,
-                        "odds": odds,
-                    })
-            print(f"  [SportyBet] {league_name}: +{len(results)} matches (Vuex store)")
-            return results
     except Exception:
         pass
 
-    # Strategy 4: DOM fallback (1X2 only)
-    print(f"  [SportyBet] {league_name}: API + Vuex failed, using DOM fallback")
-    try:
-        await page.wait_for_selector(".match-row", timeout=10000)
-        await page.wait_for_timeout(1000)
-        raw = await page.evaluate("""() => {
-            const rows = document.querySelectorAll('.match-row');
-            const matches = [];
-            for (const row of rows) {
-                const home = row.querySelector('.home-team')?.textContent?.trim() || '';
-                const away = row.querySelector('.away-team')?.textContent?.trim() || '';
-                const oddsEls = [...row.querySelectorAll('.m-outcome-odds')];
-                const odds = oddsEls.map(o => o.textContent.trim());
-                if (home && away && odds.length >= 3) {
-                    matches.push({ home, away, odds });
-                }
-            }
-            return matches;
-        }""")
-        for m in raw:
-            if current_count + len(results) >= max_matches:
-                break
-            key = f"{m['home']}-{m['away']}"
-            if key in seen:
-                continue
-            seen.add(key)
-            odds = {"1X2": {"1": m["odds"][0], "X": m["odds"][1], "2": m["odds"][2]}}
-            results.append({
-                "event_id": key,
-                "event": f"{m['home']} - {m['away']}",
-                "league": league_name,
-                "odds": odds,
-            })
-        print(f"  [SportyBet] {league_name}: +{len(results)} matches (DOM fallback)")
-    except Exception as e:
-        print(f"  [SportyBet] {league_name}: all methods failed: {e}")
-
-    return results
+    return event
 
 
 async def scrape_sportybet(max_matches: int = 50, days: int = 7) -> list[dict]:
-    """Main entry point - scrape all configured leagues."""
+    """Main entry point â scrape all leagues via pure API calls."""
+    start_time = time.time()
     results = []
     seen = set()
 
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
-        )
-        page = await browser.new_page()
-        # Block images/fonts for speed
-        await page.route(
-            "**/*.{png,jpg,jpeg,gif,webp,woff,woff2,svg}",
-            lambda r: r.abort(),
-        )
+    async with aiohttp.ClientSession(headers=HEADERS) as session:
+        # Step 1: Hit the main page to establish cookies/session
+        try:
+            async with session.get(
+                "https://www.sportybet.com/ng/sport/football",
+                timeout=aiohttp.ClientTimeout(total=10),
+            ):
+                pass
+            print("  [SportyBet] Session initialized")
+        except Exception as e:
+            print(f"  [SportyBet] Session init warning: {e}")
 
-        for league_name, url in TOURNAMENT_URLS.items():
-            if len(results) >= max_matches:
-                break
-            try:
-                tournament_id = TOURNAMENT_IDS[league_name]
-                league_matches = await _scrape_league(
-                    page, league_name, url, tournament_id,
-                    seen, max_matches, len(results),
-                )
-                results.extend(league_matches)
-            except Exception as e:
-                print(f"  [SportyBet] {league_name} error: {e}")
-                continue
+        # Step 2: Fetch ALL leagues concurrently
+        league_tasks = []
+        for league_name, tournament_id in TOURNAMENT_IDS.items():
+            league_tasks.append(
+                _fetch_league_events(session, league_name, tournament_id)
+            )
 
-        await browser.close()
+        league_results = await asyncio.gather(*league_tasks, return_exceptions=True)
 
-    print(f"  [SportyBet] Done - {len(results)} matches total")
+        # Collect all events
+        all_events = []
+        for i, (league_name, _) in enumerate(TOURNAMENT_IDS.items()):
+            if isinstance(league_results[i], list):
+                for event in league_results[i]:
+                    home = event["home"]
+                    away = event["away"]
+                    key = f"{home}-{away}"
+                    if key not in seen and len(all_events) < max_matches:
+                        seen.add(key)
+                        event["league"] = league_name
+                        all_events.append(event)
+
+        print(f"  [SportyBet] Total events from pcEvents: {len(all_events)}")
+
+        # Step 3: Check if events need enrichment (only have 1X2)
+        needs_enrichment = [
+            e for e in all_events
+            if "Double Chance" not in e["odds"] or "O/U 2.5" not in e["odds"]
+        ]
+
+        if needs_enrichment:
+            print(f"  [SportyBet] Enriching {len(needs_enrichment)} events with DC/O/U...")
+
+            # Enrich in batches of 10 to avoid hammering the API
+            BATCH_SIZE = 10
+            enriched_count = 0
+            for i in range(0, len(needs_enrichment), BATCH_SIZE):
+                batch = needs_enrichment[i:i + BATCH_SIZE]
+                enrich_tasks = [_enrich_event(session, e) for e in batch]
+                await asyncio.gather(*enrich_tasks, return_exceptions=True)
+                for e in batch:
+                    if "Double Chance" in e["odds"] or "O/U 2.5" in e["odds"]:
+                        enriched_count += 1
+
+            print(f"  [SportyBet] Enriched {enriched_count}/{len(needs_enrichment)} events")
+
+        # Build final results
+        for event in all_events:
+            results.append({
+                "event_id": f"{event['home']}-{event['away']}",
+                "event": f"{event['home']} - {event['away']}",
+                "league": event["league"],
+                "odds": event["odds"],
+            })
+
+    elapsed = time.time() - start_time
+    print(f"  [SportyBet] Done â {len(results)} matches in {elapsed:.1f}s")
     return results
 
 
