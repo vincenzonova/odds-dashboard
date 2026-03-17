@@ -1,15 +1,11 @@
 """
-SportyBet Scraper v2 - Vuex Store extraction (replaces DOM-clicking approach).
-Still uses Playwright to navigate (needed for auth cookies), but extracts ALL
-odds data from window.v_store (Vue/Vuex) in a single page.evaluate() per league.
-
-Speed improvement: ~10-30s per league instead of ~40-60s (no dropdown clicking).
-
+SportyBet Scraper - uses Playwright to render the page and extract odds from DOM.
+Needed because SportyBet's API requires session cookies set by their JS framework.
 Extracts:
-  - 1X2 odds        (market ID "1")
-  - Over/Under 2.5   (market ID "18", specifier "total=2.5")
-  - Over/Under 1.5   (market ID "18", specifier "total=1.5")
-  - Double Chance     (market ID "10")
+  - 1X2 odds (from the default "3 Way & O/U" tab)
+  - Over/Under 2.5 (only when the displayed spread is actually 2.5)
+  - Over/Under 1.5 (by clicking spread dropdown to select 1.5)
+  - Double Chance (by clicking the "Double Chance" tab)
 """
 
 import asyncio
@@ -27,97 +23,13 @@ TOURNAMENT_URLS = {
     "Ligue 1":        f"{SPORTYBET_BASE}/sr:category:7/sr:tournament:34",
     "Champions League":f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:7",
     "Europa League":  f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:679",
-}
-
-# Tournament IDs matching each URL (extracted from URL path)
-TOURNAMENT_IDS = {
-    "Premier League": "sr:tournament:17",
-    "La Liga":        "sr:tournament:8",
-    "Serie A":        "sr:tournament:23",
-    "Bundesliga":     "sr:tournament:35",
-    "Ligue 1":        "sr:tournament:34",
-    "Champions League":"sr:tournament:7",
-    "Europa League":  "sr:tournament:679",
+    "Conference League":f"{SPORTYBET_BASE}/sr:category:393/sr:tournament:34480",
 }
 
 
-# -- Single JS evaluation to extract ALL odds from Vuex store --
-JS_EXTRACT_VUEX = """
-(tournamentId) => {
-  try {
-    const store = window.v_store;
-    if (!store || !store.state || !store.state.eventList) return {error: 'no store'};
-
-    const sportMap = store.state.eventList.sport;
-    if (!sportMap || !sportMap.map) return {error: 'no sport map'};
-
-    const tournament = sportMap.map[tournamentId];
-    if (!tournament || !tournament.events) return {error: 'no tournament', id: tournamentId};
-
-    const events = Object.values(tournament.events).map(e => {
-      const m = e.markets || {};
-      const result = {
-        eventId: e.eventId,
-        home: e.homeTeamName,
-        away: e.awayTeamName,
-        estimateStartTime: e.estimateStartTime,
-        odds: {}
-      };
-
-      // 1X2 (market "1")
-      if (m["1"] && m["1"].outcomes) {
-        const o = m["1"].outcomes;
-        if (o["1"] && o["2"] && o["3"]) {
-          result.odds["1X2"] = {
-            "1": o["1"].odds,
-            "X": o["2"].odds,
-            "2": o["3"].odds
-          };
-        }
-      }
-
-      // Over/Under (market "18") - extract both 2.5 and 1.5
-      if (m["18"]) {
-        const ouMarkets = Object.values(m["18"]);
-        for (const ou of ouMarkets) {
-          if (!ou.outcomes) continue;
-          const vals = Object.values(ou.outcomes);
-          const overEntry = vals.find(v => v.desc && v.desc.startsWith("Over"));
-          const underEntry = vals.find(v => v.desc && v.desc.startsWith("Under"));
-          if (!overEntry || !underEntry) continue;
-
-          if (ou.specifier === "total=2.5") {
-            result.odds["O/U 2.5"] = { Over: overEntry.odds, Under: underEntry.odds };
-          } else if (ou.specifier === "total=1.5") {
-            result.odds["O/U 1.5"] = { Over: overEntry.odds, Under: underEntry.odds };
-          }
-        }
-      }
-
-      // Double Chance (market "10")
-      if (m["10"] && m["10"].outcomes) {
-        const o = m["10"].outcomes;
-        if (o["9"] && o["10"] && o["11"]) {
-          result.odds["Double Chance"] = {
-            "1X": o["9"].odds,
-            "12": o["10"].odds,
-            "X2": o["11"].odds
-          };
-        }
-      }
-
-      return result;
-    });
-
-    return {ok: true, count: events.length, events: events};
-  } catch (err) {
-    return {error: err.message};
-  }
-}
-"""
-
-# -- Fallback: DOM extraction (used if Vuex store not available) --
-JS_EXTRACT_DOM_FALLBACK = """
+# -- JS extraction for "3 Way & O/U" tab --
+# Returns 1X2 odds + O/U odds + current spread per match
+JS_EXTRACT_MAIN = """
 () => {
   const rows = document.querySelectorAll('.match-row');
   const matches = [];
@@ -136,7 +48,89 @@ JS_EXTRACT_DOM_FALLBACK = """
 """
 
 
-# -- Team name normalization (same as v1) --
+# -- JS: click a specific row's spread dropdown and select a target value --
+# Takes [rowIndex, targetSpread] - clicks the dropdown, picks the target, returns new O/U odds
+JS_CLICK_SPREAD_VALUE = """
+([rowIndex, targetSpread]) => {
+  return new Promise((resolve) => {
+    const rows = document.querySelectorAll('.match-row');
+    if (rowIndex >= rows.length) { resolve(null); return; }
+    const row = rows[rowIndex];
+
+    const selectTitle = row.querySelector('.af-select-title') || row.querySelector('.af-select');
+    if (!selectTitle) { resolve(null); return; }
+    selectTitle.click();
+
+    setTimeout(() => {
+      const openList = document.querySelector('.af-select-list.af-select-list-open');
+      if (!openList) { resolve(null); return; }
+      const items = [...openList.querySelectorAll('.af-select-item')];
+      const target = items.find(i => i.textContent.trim() === targetSpread);
+      if (!target) {
+        document.body.click();
+        resolve(null);
+        return;
+      }
+      target.click();
+
+      setTimeout(() => {
+        const oddsEls = [...row.querySelectorAll('.m-outcome-odds')];
+        const odds = oddsEls.map(o => o.textContent.trim());
+        const newSpread = row.querySelector('.af-select-input')?.textContent?.trim() || '';
+        resolve({ odds, spread: newSpread });
+      }, 800);
+    }, 500);
+  });
+}
+"""
+
+
+# -- JS extraction for "Double Chance" tab --
+# Returns 3 odds: 1X, 12, X2
+JS_EXTRACT_DC = """
+() => {
+  const rows = document.querySelectorAll('.match-row');
+  const matches = [];
+  for (const row of rows) {
+    const home = row.querySelector('.home-team')?.textContent?.trim() || '';
+    const away = row.querySelector('.away-team')?.textContent?.trim() || '';
+    const oddsEls = [...row.querySelectorAll('.m-outcome-odds')];
+    const odds = oddsEls.map(o => o.textContent.trim());
+    if (home && away && odds.length >= 3) {
+      matches.push({ home, away, odds });
+    }
+  }
+  return matches;
+}
+"""
+
+
+def _build_odds_dict(main_data: dict) -> dict:
+    """Build odds dict from 3 Way & O/U tab data (includes spread check)."""
+    odds_list = main_data["odds"]
+    spread = main_data.get("spread", "")
+    result = {}
+    if len(odds_list) >= 3:
+        result["1X2"] = {"1": odds_list[0], "X": odds_list[1], "2": odds_list[2]}
+    # Only include O/U if spread is exactly 2.5
+    if len(odds_list) >= 5 and spread.strip() == "2.5":
+        result["O/U 2.5"] = {"Over": odds_list[3], "Under": odds_list[4]}
+    return result
+
+
+def _add_dc_odds(existing_odds: dict, dc_odds_list: list[str]) -> dict:
+    """Add Double Chance odds to an existing odds dict."""
+    if len(dc_odds_list) >= 3:
+        existing_odds["Double Chance"] = {
+            "1X": dc_odds_list[0],
+            "12": dc_odds_list[1],
+            "X2": dc_odds_list[2],
+        }
+    return existing_odds
+
+
+# -- Team name normalization --
+# Common abbreviations/aliases between Bet9ja and SportyBet
 TEAM_ALIASES = {
     "atl. madrid": "atletico madrid",
     "atl madrid": "atletico madrid",
@@ -206,9 +200,11 @@ TEAM_ALIASES = {
 def _normalize_team(name: str) -> str:
     """Normalize a team name for matching."""
     n = name.lower().strip()
+    # Remove common suffixes
     for suffix in [" fc", " cf", " sc", " ssc", " bc", " afc"]:
         if n.endswith(suffix):
             n = n[:-len(suffix)].strip()
+    # Check aliases
     return TEAM_ALIASES.get(n, n)
 
 
@@ -224,6 +220,7 @@ def _team_similarity(a: str, b: str) -> float:
     """Compare two normalized team names."""
     if a == b:
         return 1.0
+    # Check if one contains the other
     if a in b or b in a:
         return 0.85
     return SequenceMatcher(None, a, b).ratio()
@@ -238,10 +235,12 @@ def fuzzy_match(name_a: str, name_b: str, threshold: float = 0.70) -> bool:
     home_b, away_b = _split_teams(name_b)
     if not home_a or not home_b:
         return False
+    # Try direct match (home-home, away-away)
     home_sim = _team_similarity(home_a, home_b)
     away_sim = _team_similarity(away_a, away_b) if away_a and away_b else 0
     if home_sim >= threshold and away_sim >= threshold:
         return True
+    # Try swapped match (home-away, away-home) - sometimes order differs
     home_sim2 = _team_similarity(home_a, away_b) if away_b else 0
     away_sim2 = _team_similarity(away_a, home_b) if away_a else 0
     if home_sim2 >= threshold and away_sim2 >= threshold:
@@ -249,116 +248,125 @@ def fuzzy_match(name_a: str, name_b: str, threshold: float = 0.70) -> bool:
     return False
 
 
-def _build_odds_dict_from_dom(main_data: dict) -> dict:
-    """Build odds dict from DOM fallback data."""
-    odds_list = main_data["odds"]
-    spread = main_data.get("spread", "")
-    result = {}
-    if len(odds_list) >= 3:
-        result["1X2"] = {"1": odds_list[0], "X": odds_list[1], "2": odds_list[2]}
-    if len(odds_list) >= 5 and spread.strip() == "2.5":
-        result["O/U 2.5"] = {"Over": odds_list[3], "Under": odds_list[4]}
-    return result
+async def _click_spread_for_value(page, dom_row_idx: int, target: str):
+    """Click a row's spread dropdown and select the target value. Returns O/U odds dict or None."""
+    try:
+        result = await page.evaluate(JS_CLICK_SPREAD_VALUE, [dom_row_idx, target])
+        if result and result.get("spread", "").strip() == target:
+            odds_list = result["odds"]
+            if len(odds_list) >= 5:
+                return {"Over": odds_list[3], "Under": odds_list[4]}
+        return None
+    except Exception:
+        return None
 
 
-async def _scrape_league_vuex(page, league_name: str, url: str, tournament_id: str,
-                               seen: set, max_matches: int, current_count: int) -> list[dict]:
-    """Scrape a single league using Vuex store extraction (fast path).
-
-    Instead of clicking dropdowns and tabs in the DOM, we extract ALL odds
-    data from the Vue/Vuex store in a single page.evaluate() call.
-    This gives us 1X2, O/U 1.5, O/U 2.5, and Double Chance simultaneously.
-    """
+async def _scrape_league(page, league_name: str, url: str, seen: set,
+                         max_matches: int, current_count: int) -> list[dict]:
+    """Scrape a single league: main tab (1X2 + O/U 2.5 + O/U 1.5) then Double Chance tab."""
     results = []
     print(f"  [SportyBet] Loading {league_name}...")
 
     await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    await page.wait_for_selector(".match-row", timeout=15000)
+    await page.wait_for_timeout(1000)
 
-    # Wait for Vuex store to be populated with event data
-    try:
-        await page.wait_for_function(
-            """(tid) => {
-                try {
-                    const m = window.v_store.state.eventList.sport.map[tid];
-                    return m && m.events && Object.keys(m.events).length > 0;
-                } catch(e) { return false; }
-            }""",
-            tournament_id,
-            timeout=15000,
-        )
-    except Exception:
-        print(f"  [SportyBet] {league_name}: Vuex store not ready, falling back to DOM")
-        return await _scrape_league_dom_fallback(page, league_name, seen, max_matches, current_count)
+    # -- Step 1: Scrape "3 Way & O/U" tab (default) --
+    raw_main = await page.evaluate(JS_EXTRACT_MAIN)
 
-    # Extract all data from Vuex store in one call
-    data = await page.evaluate(JS_EXTRACT_VUEX, tournament_id)
+    # Build initial results with 1X2 + conditional O/U 2.5
+    # Also track DOM row indices for dropdown interactions
+    league_matches = []
+    rows_needing_ou25 = []  # (match_index, dom_row_index) for rows where spread != 2.5
+    all_dom_indices = []     # (match_index, dom_row_index) for ALL rows (for O/U 1.5)
+    dom_index = 0
 
-    if not data or data.get("error"):
-        print(f"  [SportyBet] {league_name}: Vuex extraction failed ({data}), falling back to DOM")
-        return await _scrape_league_dom_fallback(page, league_name, seen, max_matches, current_count)
-
-    for event in data.get("events", []):
-        if current_count + len(results) >= max_matches:
-            break
-
-        home = event.get("home", "")
-        away = event.get("away", "")
-        key = f"{home}-{away}"
-        if key in seen:
-            continue
-        seen.add(key)
-
-        odds = event.get("odds", {})
-        if not odds or "1X2" not in odds:
-            continue
-
-        results.append({
-            "event_id": key,
-            "event": f"{home} - {away}",
-            "league": league_name,
-            "odds": odds,
-        })
-
-    print(f"  [SportyBet] {league_name}: +{len(results)} matches (Vuex store, instant)")
-    return results
-
-
-async def _scrape_league_dom_fallback(page, league_name: str, seen: set,
-                                       max_matches: int, current_count: int) -> list[dict]:
-    """DOM fallback - simplified version without dropdown clicking.
-    Used only when Vuex store is not available (e.g. site structure changed).
-    Gets 1X2 and O/U 2.5 (if default spread) but skips O/U 1.5 and DC for speed.
-    """
-    results = []
-    try:
-        await page.wait_for_selector(".match-row", timeout=15000)
-        await page.wait_for_timeout(1000)
-    except Exception:
-        print(f"  [SportyBet] {league_name}: no match rows found")
-        return results
-
-    raw = await page.evaluate(JS_EXTRACT_DOM_FALLBACK)
-    for m in raw:
-        if current_count + len(results) >= max_matches:
-            break
+    for m in raw_main:
         key = f"{m['home']}-{m['away']}"
         if key in seen:
+            dom_index += 1
             continue
         seen.add(key)
-        odds = _build_odds_dict_from_dom(m)
+
+        odds = _build_odds_dict(m)
         if odds:
-            results.append({
+            spread = m.get("spread", "")
+            match_idx = len(league_matches)
+            league_matches.append({
                 "event_id": key,
                 "event": f"{m['home']} - {m['away']}",
                 "league": league_name,
                 "odds": odds,
             })
 
-    print(f"  [SportyBet] {league_name}: +{len(results)} matches (DOM fallback)")
-    return results
+            # Track ALL rows for O/U 1.5 scraping
+            all_dom_indices.append((match_idx, dom_index))
+
+            # Track rows where spread != 2.5 but O/U odds exist (just wrong spread)
+            if spread.strip() != "2.5" and len(m["odds"]) >= 5:
+                rows_needing_ou25.append((match_idx, dom_index))
+
+        dom_index += 1
+        if current_count + len(league_matches) >= max_matches:
+            break
+
+    # -- Step 1b: Click dropdown to select 2.5 for rows with non-2.5 spread --
+    if rows_needing_ou25:
+        print(f"  [SportyBet] {league_name}: fixing O/U 2.5 spread for {len(rows_needing_ou25)} matches...")
+        ou_fixed = 0
+        for match_idx, dom_row_idx in rows_needing_ou25:
+            ou_odds = await _click_spread_for_value(page, dom_row_idx, "2.5")
+            if ou_odds:
+                league_matches[match_idx]["odds"]["O/U 2.5"] = ou_odds
+                ou_fixed += 1
+            await page.wait_for_timeout(300)
+        print(f"  [SportyBet] {league_name}: fixed O/U 2.5 for {ou_fixed}/{len(rows_needing_ou25)} matches")
+
+    # -- Step 1c: Click dropdown to select 1.5 for ALL rows to get O/U 1.5 --
+    if all_dom_indices:
+        print(f"  [SportyBet] {league_name}: scraping O/U 1.5 for {len(all_dom_indices)} matches...")
+        ou15_count = 0
+        for match_idx, dom_row_idx in all_dom_indices:
+            ou_odds = await _click_spread_for_value(page, dom_row_idx, "1.5")
+            if ou_odds:
+                league_matches[match_idx]["odds"]["O/U 1.5"] = ou_odds
+                ou15_count += 1
+            await page.wait_for_timeout(300)
+        print(f"  [SportyBet] {league_name}: got O/U 1.5 for {ou15_count}/{len(all_dom_indices)} matches")
+
+    # -- Step 2: Click "Double Chance" tab and scrape --
+    try:
+        dc_tab = page.locator('.market-item', has_text='Double Chance')
+        if await dc_tab.count() > 0:
+            await dc_tab.first.click()
+            await page.wait_for_timeout(1500)  # wait for odds to update
+
+            raw_dc = await page.evaluate(JS_EXTRACT_DC)
+
+            # Build a lookup by home-away key
+            dc_lookup = {}
+            for m in raw_dc:
+                key = f"{m['home']}-{m['away']}"
+                dc_lookup[key] = m["odds"]
+
+            # Merge DC odds into existing results
+            dc_added = 0
+            for match in league_matches:
+                key = match["event_id"]
+                if key in dc_lookup:
+                    _add_dc_odds(match["odds"], dc_lookup[key])
+                    dc_added += 1
+
+            print(f"  [SportyBet] {league_name}: +{len(league_matches)} matches, {dc_added} with DC odds")
+        else:
+            print(f"  [SportyBet] {league_name}: +{len(league_matches)} matches (no DC tab found)")
+    except Exception as e:
+        print(f"  [SportyBet] {league_name}: +{len(league_matches)} matches (DC scrape failed: {e})")
+
+    return league_matches
 
 
-async def scrape_sportybet(max_matches: int = 50, days: int = 7) -> list[dict]:
+async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
     results = []
     seen = set()
 
@@ -377,10 +385,8 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 7) -> list[dict]:
             if len(results) >= max_matches:
                 break
             try:
-                tournament_id = TOURNAMENT_IDS[league_name]
-                league_matches = await _scrape_league_vuex(
-                    page, league_name, url, tournament_id,
-                    seen, max_matches, len(results),
+                league_matches = await _scrape_league(
+                    page, league_name, url, seen, max_matches, len(results)
                 )
                 results.extend(league_matches)
             except Exception as e:
