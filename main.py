@@ -52,16 +52,16 @@ SCRAPER_TIMEOUTS = {
     "Bet9ja": 60,       # API-based, fast
     # "BetKing": 60,      # PAUSED
     # "Betano": 60,       # PAUSED
-    "SportyBet": 420,   # Playwright, needs 3-5 min for all leagues
-    "MSport": 600,      # Playwright, 10 days needs 6-8 min
-    "Betgr8": 420,      # Playwright, needs 4-5 min with O/U 1.5 pass-4 min
+    "SportyBet": 90,    # Pure API (aiohttp), ~10-15s
+    "MSport": 420,      # Playwright, 10 days needs 5-6 min
+    "Betgr8": 300,      # Playwright, needs 3-4 min
 }
 
 # ── Betslip Service (separate Railway instance) ───────────────────────
 BETSLIP_SERVICE_URL = os.getenv("BETSLIP_SERVICE_URL", "")
 BETSLIP_API_SECRET = os.getenv("BETSLIP_API_SECRET", "betslip-secret-key")
 DEFAULT_SCRAPER_TIMEOUT = 120
-GATHER_TIMEOUT_SECONDS = 600
+GATHER_TIMEOUT_SECONDS = 480
 
 # --- Merge logic (extracted to merge.py) ---
 from merge import (
@@ -212,18 +212,19 @@ async def do_refresh():
         # to avoid memory pressure from 3+ concurrent headless browsers
         async def _run_playwright_scrapers():
             """Run Playwright scrapers in parallel with asyncio.gather."""
-            r1, r2, r3 = await asyncio.gather(
-                safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
+            r1, r2 = await asyncio.gather(
                 safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, MSPORT_MIN_DAYS)),
                 safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
             )
-            return [r1, r2, r3]
+            return [r1, r2]
 
-        bet9ja_result, playwright_results = await asyncio.gather(
+        # SportyBet v4 is now pure API (aiohttp) - runs alongside Bet9ja, not in Playwright group
+        bet9ja_result, sportybet_result, playwright_results = await asyncio.gather(
             safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, BET9JA_MIN_DAYS)),
+            safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
             _run_playwright_scrapers(),
         )
-        results = [bet9ja_result] + playwright_results
+        results = [bet9ja_result, sportybet_result] + playwright_results
 
         # Store raw data
         raw_data = {}
