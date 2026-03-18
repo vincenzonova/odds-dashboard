@@ -153,3 +153,5 @@ All tests must pass before committing. If a test fails:
 
 The repo has a CI workflow at `.github/workflows/test.yml` that runs pytest on every push.
 Check that CI is green after pushing.
+
+<!-- trigger redeploy -->
