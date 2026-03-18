@@ -22,7 +22,9 @@ from bet9ja_scraper import scrape_bet9ja
 from sportybet_scraper import scrape_sportybet
 # from betking_scraper import scrape_betking  # PAUSED - geo-blocked
 from msport_scraper import scrape_msport
-from betgr8_scraper import scrape_betgr8
+from yajuego_scraper import scrape_yajuego
+from betfair_scraper import scrape_betfair
+# from betgr8_scraper import scrape_betgr8  # PAUSED
 # from betano_scraper import scrape_betano  # PAUSED - timeout issues
 
 # Import dashboard HTML builder
@@ -37,14 +39,14 @@ from betslip_checker import (
     calculate_msport_returns,
     # calculate_betano_returns,  # PAUSED
     _sportybet_formula_fallback,
-    calculate_betgr8_returns,
+    calculate_yajuego_returns,
 )
 
 # Configuration
 SECRET_KEY = "your-secret-key-change-in-production"
 MAX_MATCHES = 160
 SCRAPE_DAYS = 7  # Default: scrape next 7 days. Configurable via settings (1-10)
-MSPORT_MIN_DAYS = 7   # MSport needs wider window for coverage (SportyBet/Betgr8 don't filter by date)
+MSPORT_MIN_DAYS = 7   # MSport needs wider window for coverage (SportyBet/YaJuego don't filter by date)
 BET9JA_MIN_DAYS = 7   # Bet9ja API is fast, wider window improves merge coverage
 REFRESH_INTERVAL_MINUTES = 5
 DB_PATH = "odds_history.db"
@@ -54,7 +56,8 @@ SCRAPER_TIMEOUTS = {
     # "Betano": 60,       # PAUSED
     "SportyBet": 420,   # Playwright, needs 3-5 min for all leagues
     "MSport": 600,      # Playwright, 10 days needs 6-8 min
-    "Betgr8": 420,      # Playwright, needs 4-5 min with O/U 1.5 pass-4 min
+    "YaJuego": 60,      # API-based, fast
+    "Betfair": 60,      # API-based, direct Betfair Exchange
 }
 
 # ── Betslip Service (separate Railway instance) ───────────────────────
@@ -73,7 +76,7 @@ from merge import (
     merge_odds,
 )
 
-BOOKMAKERS = ["bet9ja", "sportybet", "msport", "betgr8"]
+BOOKMAKERS = ["bet9ja", "sportybet", "msport", "yajuego"]
 
 # Global cache with expanded structure for 5 bookmakers
 cache = {
@@ -86,7 +89,8 @@ cache = {
     "raw_betking": [],
     "raw_msport": [],
     "raw_betano": [],
-    "raw_betgr8": [],
+    "raw_yajuego": [],
+    "raw_betfair": [],
     "match_name_map": {},
     "last_errors": [],
 }
@@ -135,7 +139,7 @@ def init_db():
             betking_odds REAL,
             msport_odds REAL,
             betano_odds REAL,
-            betgr8_odds REAL
+            yajuego_odds REAL
         )
     """)
     conn.commit()
@@ -151,7 +155,7 @@ def save_odds_to_db(rows: list):
         for row in rows:
             cursor.execute(
                 """INSERT INTO odds_history (timestamp, league, event, market, sign,
-                    bet9ja_odds, sportybet_odds, betking_odds, msport_odds, betano_odds, betgr8_odds)
+                    bet9ja_odds, sportybet_odds, betking_odds, msport_odds, betano_odds, yajuego_odds)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     timestamp,
@@ -164,7 +168,7 @@ def save_odds_to_db(rows: list):
                     row.get("betking"),
                     row.get("msport"),
                     row.get("betano"),
-                    row.get("betgr8"),
+                    row.get("yajuego"),
                 ),
             )
         conn.commit()
@@ -224,7 +228,7 @@ async def do_refresh():
             safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, BET9JA_MIN_DAYS)),
             _run_playwright_scrapers(),
         )
-        results = [bet9ja_result] + playwright_results
+        results = [bet9ja_result, yajuego_result, betfair_result] + playwright_results
 
         # Store raw data
         raw_data = {}
@@ -239,7 +243,7 @@ async def do_refresh():
         cache["raw_sportybet"] = raw_data.get("sportybet", [])
         # cache["raw_betking"] = raw_data.get("betking", [])  # PAUSED
         cache["raw_msport"] = raw_data.get("msport", [])
-        cache["raw_betgr8"] = raw_data.get("betgr8", [])
+        cache["raw_yajuego"] = raw_data.get("yajuego", [])
         # cache["raw_betano"] = raw_data.get("betano", [])  # PAUSED
 
         # Merge odds from all bookmakers
@@ -255,6 +259,7 @@ async def do_refresh():
         cache["status"] = f"Updated at {datetime.now().strftime('%H:%M:%S')}"
         if errors:
             cache["status"] += f" ({len(errors)} errors)"
+        cache["last_errors"] = errors
             cache["last_errors"] = errors
 
     except asyncio.TimeoutError:
@@ -514,7 +519,7 @@ async def api_custom_comparison(
         body = await request.json()
         selections = body.get("selections", [])
         stake = body.get("stake", 100.0)
-        bookmakers = body.get("bookmakers", ["bet9ja", "sportybet", "msport", "betgr8"])
+        bookmakers = body.get("bookmakers", ["bet9ja", "sportybet", "msport", "yajuego"])
         if not selections:
             raise HTTPException(status_code=400, detail="No selections provided")
 
@@ -523,7 +528,7 @@ async def api_custom_comparison(
             "bet9ja": lambda: calculate_bet9ja_returns(selections, stake),
             "sportybet": lambda: _sportybet_formula_fallback(selections, stake),
             "msport": lambda: calculate_msport_returns(selections, stake),
-            "betgr8": lambda: calculate_betgr8_returns(selections, stake),
+            "yajuego": lambda: calculate_yajuego_returns(selections, stake),
         }
         result = {}
         for bm in bookmakers:
@@ -558,7 +563,7 @@ async def api_live_comparison(
         body = await request.json()
         selections = body.get("selections", [])
         stake = body.get("stake", 100.0)
-        bookmakers = body.get("bookmakers", ["bet9ja", "sportybet", "msport", "betgr8"])
+        bookmakers = body.get("bookmakers", ["bet9ja", "sportybet", "msport", "yajuego"])
 
         if not selections:
             raise HTTPException(status_code=400, detail="No selections provided")
@@ -584,7 +589,7 @@ async def api_live_comparison(
                         "bet9ja": lambda: calculate_bet9ja_returns(selections, stake),
                         "sportybet": lambda: _sportybet_formula_fallback(selections, stake),
                         "msport": lambda: calculate_msport_returns(selections, stake),
-                        "betgr8": lambda: calculate_betgr8_returns(selections, stake),
+                        "yajuego": lambda: calculate_yajuego_returns(selections, stake),
                     }
                     for bm in bookmakers:
                         bm_result = betslip_results.get(bm, {})
@@ -609,7 +614,7 @@ async def api_live_comparison(
             "bet9ja": lambda: calculate_bet9ja_returns(selections, stake),
             "sportybet": lambda: _sportybet_formula_fallback(selections, stake),
             "msport": lambda: calculate_msport_returns(selections, stake),
-            "betgr8": lambda: calculate_betgr8_returns(selections, stake),
+            "yajuego": lambda: calculate_yajuego_returns(selections, stake),
         }
         result = {}
         for bm in bookmakers:
