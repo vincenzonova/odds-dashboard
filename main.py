@@ -23,7 +23,8 @@ from sportybet_scraper import scrape_sportybet
 # from betking_scraper import scrape_betking  # PAUSED - geo-blocked
 from msport_scraper import scrape_msport
 from yajuego_scraper import scrape_yajuego
-    from betfair_scraper import scrape_betfair
+from betfair_scraper import scrape_betfair
+# from betgr8_scraper import scrape_betgr8  # PAUSED
 # from betano_scraper import scrape_betano  # PAUSED - timeout issues
 
 # Import dashboard HTML builder
