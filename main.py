@@ -259,7 +259,7 @@ async def do_refresh():
         cache["status"] = f"Updated at {datetime.now().strftime('%H:%M:%S')}"
         if errors:
             cache["status"] += f" ({len(errors)} errors)"
-        cache["last_errors"] = errors
+            cache["last_errors"] = errors
             cache["last_errors"] = errors
 
     except asyncio.TimeoutError:
