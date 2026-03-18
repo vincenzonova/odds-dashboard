@@ -122,8 +122,8 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
 .bm-box.bet9ja{{border-color:#22c55e}} .bm-box.bet9ja.best{{box-shadow:0 0 12px rgba(34,197,94,.3)}}
 .bm-box.sportybet{{border-color:#f59e0b}} .bm-box.sportybet.best{{box-shadow:0 0 12px rgba(245,158,11,.3)}}
 .bm-box.msport{{border-color:#ef4444}}
-.bm-box.betgr8{{border-color:#8b5cf6}} .bm-box.msport.best{{box-shadow:0 0 12px rgba(239,68,68,.3)}}
-.bm-box.betgr8.best{{box-shadow:0 0 12px rgba(139,92,246,.3)}}
+.bm-box.yajuego{{border-color:#8b5cf6}} .bm-box.msport.best{{box-shadow:0 0 12px rgba(239,68,68,.3)}}
+.bm-box.yajuego.best{{box-shadow:0 0 12px rgba(139,92,246,.3)}}
 .bm-box.best{{font-weight:700;background:rgba(34,197,94,.08)}}
 .bm-name{{font-weight:700;font-size:.75rem;text-transform:uppercase;margin-bottom:6px;opacity:.9}}
 .bm-odds{{font-size:1.1rem;font-weight:700;font-variant-numeric:tabular-nums}}
@@ -212,7 +212,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
           <th data-col="bet9ja">Bet9ja <span class="sort-arrow">&#9650;</span></th>
           <th data-col="sportybet">SportyBet <span class="sort-arrow">&#9650;</span></th>
           <th data-col="msport">MSport <span class="sort-arrow">&#9650;</span></th>
-            <th data-col="betgr8">Betgr8 <span class="sort-arrow">&#9650;</span></th>
+            <th data-col="yajuego">YaJuego <span class="sort-arrow">&#9650;</span></th>
           <th data-col="diff">Best Diff <span class="sort-arrow">&#9650;</span></th>
         </tr>
       </thead>
@@ -229,7 +229,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
     <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="bet9ja" checked> Bet9ja</label>
     <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="sportybet" checked> SportyBet</label>
     <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="msport" checked> MSport</label>
-    <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="betgr8" checked> Betgr8</label>
+    <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="yajuego" checked> YaJuego</label>
   </div>
   <div class="acca-loading" id="acca-loading" style="display:none">Generating comparison&hellip;</div>
   <div class="acca-grid" id="acca-grid" style="display:none"></div>
@@ -311,7 +311,7 @@ const BOOKMAKERS = [
   {{key: 'bet9ja', name: 'Bet9ja', cls: 'bet9ja'}},
   {{key: 'sportybet', name: 'SportyBet', cls: 'sportybet'}},
   {{key: 'msport', name: 'MSport', cls: 'msport'}},
-    {{key: 'betgr8', name: 'Betgr8', cls: 'betgr8'}},
+    {{key: 'yajuego', name: 'YaJuego', cls: 'yajuego'}},
 ];
 
 /* -- Auth Helper ---- */
@@ -414,7 +414,7 @@ function doSort() {{
       vb = vb ?? (sortAsc ? 9999 : -9999);
       return sortAsc ? va - vb : vb - va;
     }}
-    if (['bet9ja', 'sportybet', 'msport', 'betgr8'].includes(sortCol)) {{
+    if (['bet9ja', 'sportybet', 'msport', 'yajuego'].includes(sortCol)) {{
       va = va === '-' ? null : parseFloat(va);
       vb = vb === '-' ? null : parseFloat(vb);
       if (va === null && vb === null) return 0;
@@ -570,7 +570,7 @@ function updateSelectionBar() {{
         const sels = data.selections || [];
         const stake = data.stake || 100;
         const acca = {{ size: sels.length, selections: sels, returns: {{}} }};
-        const BOOKS = ['bet9ja','sportybet','msport','betgr8'];
+        const BOOKS = ['bet9ja','sportybet','msport','yajuego'];
         BOOKS.forEach(b => {{
             const r = results[b] || {{}};
             if (r.status === 'success' && r.potential_win) {{
@@ -598,7 +598,7 @@ function updateSelectionBar() {{
         bet9ja: src.bet9ja || {{}},
         sportybet: src.sportybet || {{}},
         msport: src.msport || {{}},
-        betgr8: src.betgr8 || {{}}
+        yajuego: src.yajuego || {{}}
       }}
     }};
     const card = createAccaCard(acca, 0);
@@ -633,9 +633,9 @@ function createAccaCard(acca, idx) {{
   card.className = 'acca-card';
   card.style.cssText = 'margin-bottom:1.5rem;padding:1rem;border-radius:10px;background:#1a1a2e;border:1px solid #333;';
 
-  const BOOKS = ['bet9ja','sportybet','msport','betgr8'];
-  const COLORS = {{'bet9ja':'#22c55e','sportybet':'#f59e0b','msport':'#ef4444','betgr8':'#8b5cf6'}};
-  const LABELS = {{'bet9ja':'BET9JA','sportybet':'SPORTYBET','msport':'MSPORT','betgr8':'BETGR8'}};
+  const BOOKS = ['bet9ja','sportybet','msport','yajuego'];
+  const COLORS = {{'bet9ja':'#22c55e','sportybet':'#f59e0b','msport':'#ef4444','yajuego':'#8b5cf6'}};
+  const LABELS = {{'bet9ja':'BET9JA','sportybet':'SPORTYBET','msport':'MSPORT','yajuego':'YAJUEGO'}};
 
   const sels = acca.selections || [];
   const returns = acca.returns || {{}};
