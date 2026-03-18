@@ -663,7 +663,7 @@ def check_all_accumulators(
                     "betking": calculate_betking_returns(selections, 100.0),
                     "msport": calculate_msport_returns(selections, 100.0),
                     "betano": calculate_betano_returns(selections, 100.0),
-                    "betgr8": calculate_betgr8_returns(selections, 100.0),
+                    "yajuego": calculate_yajuego_returns(selections, 100.0),
                 },
             }
 
@@ -703,9 +703,9 @@ def format_currency(amount: float, currency: str = "NGN") -> str:
 
 
 
-def calculate_betgr8_returns(selections: List[Dict], stake: float = 100.0) -> Dict[str, Any]:
+def calculate_yajuego_returns(selections: List[Dict], stake: float = 100.0) -> Dict[str, Any]:
     """
-    Calculate Betgr8 returns. Simple accumulator with no documented bonus.
+    Calculate YaJuego returns. Simple accumulator with no documented bonus.
     """
     if not selections:
         return {
@@ -717,13 +717,13 @@ def calculate_betgr8_returns(selections: List[Dict], stake: float = 100.0) -> Di
     try:
         odds_list = []
         for selection in selections:
-            odds_str = selection.get("betgr8", "\u2013")
+            odds_str = selection.get("yajuego", "\u2013")
             if odds_str == "\u2013" or not odds_str or odds_str == "-":
                 return {
                     "odds": 0.0, "base_win": 0.0, "bonus_percent": 0.0,
                     "bonus_amount": 0.0, "potential_win": 0.0,
                     "source": "calculated",
-                    "error": f"Missing Betgr8 odds for {selection.get('event', 'unknown')}",
+                    "error": f"Missing YaJuego odds for {selection.get('event', 'unknown')}",
                 }
             try:
                 odds = float(odds_str)
@@ -733,7 +733,7 @@ def calculate_betgr8_returns(selections: List[Dict], stake: float = 100.0) -> Di
                     "odds": 0.0, "base_win": 0.0, "bonus_percent": 0.0,
                     "bonus_amount": 0.0, "potential_win": 0.0,
                     "source": "calculated",
-                    "error": f"Invalid Betgr8 odds '{odds_str}'",
+                    "error": f"Invalid YaJuego odds '{odds_str}'",
                 }
 
         combined_odds = 1.0
@@ -742,7 +742,7 @@ def calculate_betgr8_returns(selections: List[Dict], stake: float = 100.0) -> Di
 
         combined_odds = round(combined_odds, 4)
         base_win = round(stake * combined_odds, 2)
-        potential_win = base_win  # No bonus for Betgr8
+        potential_win = base_win  # No bonus for YaJuego
 
         return {
             "odds": combined_odds,
