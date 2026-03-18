@@ -217,12 +217,11 @@ async def do_refresh():
         # to avoid memory pressure from 3+ concurrent headless browsers
         async def _run_playwright_scrapers():
             """Run Playwright scrapers in parallel with asyncio.gather."""
-            r1, r2, r3 = await asyncio.gather(
+            r1, r2 = await asyncio.gather(
                 safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
                 safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, MSPORT_MIN_DAYS)),
-                safe_scrape("Betgr8", scrape_betgr8, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
             )
-            return [r1, r2, r3]
+            return [r1, r2]
 
         bet9ja_result, playwright_results = await asyncio.gather(
             safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, BET9JA_MIN_DAYS)),
