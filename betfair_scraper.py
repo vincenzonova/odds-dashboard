@@ -1,11 +1,12 @@
 """
-Betfair Exchange Scraper - via The Odds API (free tier).
+Betfair Exchange Scraper - Direct Betfair API (free delayed data).
 
-Uses the-odds-api.com to fetch Betfair Exchange back odds for football.
-Free tier: 500 requests/month. Each league fetch = 1 request.
-We fetch 8 leagues per refresh = 8 requests per refresh.
+Uses Betfair's official Exchange API directly:
+  1. Login via /api/login (username + password + app key)
+  2. listMarketCatalogue to find football events
+  3. listMarketBook to get back/lay prices
 
-Markets: h2h (1X2), h2h_lay (lay odds), totals (O/U)
+Free delayed key: unlimited requests, 1-180s delay (fine for comparison).
 """
 
 import asyncio
@@ -15,28 +16,35 @@ import time
 from difflib import SequenceMatcher
 
 
-# API key from environment variable
-ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
+# Betfair credentials from environment variables
+BETFAIR_USERNAME = os.getenv("BETFAIR_USERNAME", "")
+BETFAIR_PASSWORD = os.getenv("BETFAIR_PASSWORD", "")
+BETFAIR_APP_KEY = os.getenv("BETFAIR_APP_KEY", "")
 
-ODDS_API_BASE = "https://api.the-odds-api.com/v4/sports"
+BETFAIR_LOGIN_URL = "https://identitysso-cert.betfair.com/api/login"
+BETFAIR_LOGIN_URL_NOCERT = "https://identitysso.betfair.com/api/login"
+BETFAIR_API_URL = "https://api.betfair.com/exchange/betting/rest/v1.0"
 
-# Sport keys for each league
-# The Odds API uses specific sport keys for each competition
-SPORT_KEYS = {
-    "Premier League":    "soccer_epl",
-    "La Liga":           "soccer_spain_la_liga",
-    "Serie A":           "soccer_italy_serie_a",
-    "Bundesliga":        "soccer_germany_bundesliga",
-    "Ligue 1":           "soccer_france_ligue_one",
-    "Champions League":  "soccer_uefa_champs_league",
-    "Europa League":     "soccer_uefa_europa_league",
-    "Conference League": "soccer_uefa_europa_conference_league",
+# Football event type ID
+FOOTBALL_EVENT_TYPE_ID = "1"
+
+# Competition IDs for major leagues
+COMPETITION_IDS = {
+    "Premier League": "10932509",
+    "La Liga": "117",
+    "Serie A": "81",
+    "Bundesliga": "59",
+    "Ligue 1": "55",
+    "Champions League": "228",
+    "Europa League": "2005",
+    "Conference League": "12801",
 }
 
-HEADERS = {
-    "User-Agent": "OddsDashboard/1.0",
-    "Accept": "application/json",
-}
+# Market type keys
+MARKET_1X2 = "MATCH_ODDS"
+MARKET_OU25 = "OVER_UNDER_25"
+MARKET_OU15 = "OVER_UNDER_15"
+MARKET_OU35 = "OVER_UNDER_35"
 
 # -- Team name normalization --
 TEAM_ALIASES = {
@@ -56,8 +64,6 @@ TEAM_ALIASES = {
     "wolverhampton wanderers fc": "wolverhampton",
     "newcastle utd": "newcastle",
     "newcastle united": "newcastle",
-    "leeds utd": "leeds",
-    "leeds united": "leeds",
     "west ham utd": "west ham",
     "west ham united": "west ham",
     "nott forest": "nottingham forest",
@@ -72,11 +78,9 @@ TEAM_ALIASES = {
     "ac milano": "milan",
     "as roma": "roma",
     "ss lazio": "lazio",
-    "napoli ssc": "napoli",
     "ssc napoli": "napoli",
     "atalanta bc": "atalanta",
     "real sociedad": "r. sociedad",
-    "r sociedad": "r. sociedad",
     "celta vigo": "celta",
     "rc celta": "celta",
     "rayo vallecano": "rayo",
@@ -86,32 +90,23 @@ TEAM_ALIASES = {
     "bayern munich": "bayern",
     "bayern munchen": "bayern",
     "fc bayern munich": "bayern",
-    "b. dortmund": "dortmund",
     "borussia dortmund": "dortmund",
-    "b. monchengladbach": "gladbach",
-    "b. m'gladbach": "gladbach",
-    "borussia m'gladbach": "gladbach",
     "borussia monchengladbach": "gladbach",
     "rb leipzig": "leipzig",
-    "paris sg": "psg",
     "paris saint-germain": "psg",
     "paris saint germain": "psg",
     "olympique marseille": "marseille",
-    "ol. marseille": "marseille",
     "olympique de marseille": "marseille",
     "olympique lyon": "lyon",
     "olympique lyonnais": "lyon",
-    "ol. lyon": "lyon",
     "as monaco": "monaco",
-    "brighton & hove albion": "brighton",
-    "brighton hove": "brighton",
     "brighton and hove albion": "brighton",
+    "brighton & hove albion": "brighton",
     "afc bournemouth": "bournemouth",
 }
 
 
 def _normalize_team(name: str) -> str:
-    """Normalize a team name for matching."""
     n = name.lower().strip()
     for suffix in [" fc", " cf", " sc", " ssc", " bc", " afc"]:
         if n.endswith(suffix):
@@ -120,15 +115,16 @@ def _normalize_team(name: str) -> str:
 
 
 def _split_teams(event_name: str) -> tuple[str, str]:
-    """Split 'Home - Away' into normalized (home, away) tuple."""
     parts = event_name.split(" - ", 1)
+    if len(parts) == 2:
+        return _normalize_team(parts[0]), _normalize_team(parts[1])
+    parts = event_name.split(" v ", 1)
     if len(parts) == 2:
         return _normalize_team(parts[0]), _normalize_team(parts[1])
     return _normalize_team(event_name), ""
 
 
 def _team_similarity(a: str, b: str) -> float:
-    """Compare two normalized team names."""
     if a == b:
         return 1.0
     if a in b or b in a:
@@ -137,7 +133,6 @@ def _team_similarity(a: str, b: str) -> float:
 
 
 def fuzzy_match(name_a: str, name_b: str, threshold: float = 0.70) -> bool:
-    """Match two event names by checking BOTH teams individually."""
     home_a, away_a = _split_teams(name_a)
     home_b, away_b = _split_teams(name_b)
     if not home_a or not home_b:
@@ -153,125 +148,194 @@ def fuzzy_match(name_a: str, name_b: str, threshold: float = 0.70) -> bool:
     return False
 
 
-def _parse_betfair_odds(bookmaker_data: dict) -> dict:
-    """Parse odds from The Odds API bookmaker response for Betfair."""
-    odds = {}
-
-    for market in bookmaker_data.get("markets", []):
-        key = market.get("key", "")
-        outcomes = market.get("outcomes", [])
-
-        if key == "h2h":
-            # 1X2 market
-            odds_1x2 = {}
-            for o in outcomes:
-                name = o.get("name", "")
-                price = o.get("price")
-                if price is None:
-                    continue
-                if name == "Draw":
-                    odds_1x2["X"] = str(price)
-                elif name == bookmaker_data.get("_home", ""):
-                    odds_1x2["1"] = str(price)
-                elif name == bookmaker_data.get("_away", ""):
-                    odds_1x2["2"] = str(price)
-                else:
-                    # Try to match by position (first=home, last=away)
-                    pass
-            if len(odds_1x2) == 3:
-                odds["1X2"] = odds_1x2
-
-        elif key == "totals":
-            # Over/Under market
-            over_val = None
-            under_val = None
-            point = None
-            for o in outcomes:
-                name = o.get("name", "").lower()
-                price = o.get("price")
-                pt = o.get("point")
-                if price is None:
-                    continue
-                if name == "over":
-                    over_val = str(price)
-                    point = pt
-                elif name == "under":
-                    under_val = str(price)
-                    point = pt
-            if over_val and under_val and point:
-                point_str = str(point)
-                if point_str == "2.5":
-                    odds["O/U 2.5"] = {"Over": over_val, "Under": under_val}
-                elif point_str == "1.5":
-                    odds["O/U 1.5"] = {"Over": over_val, "Under": under_val}
-                elif point_str == "3.5":
-                    odds["O/U 3.5"] = {"Over": over_val, "Under": under_val}
-
-    return odds
-
-
-async def _fetch_league(session: aiohttp.ClientSession, league_name: str,
-                        sport_key: str) -> list[dict]:
-    """Fetch Betfair odds for a single league from The Odds API."""
-    if not ODDS_API_KEY:
-        print(f"  [Betfair] Skipping {league_name}: no ODDS_API_KEY set")
-        return []
-
-    url = (
-        f"{ODDS_API_BASE}/{sport_key}/odds"
-        f"?apiKey={ODDS_API_KEY}"
-        f"&regions=uk"
-        f"&markets=h2h,totals"
-        f"&oddsFormat=decimal"
-        f"&bookmakers=betfair_ex_uk"
-    )
+async def _betfair_login(session: aiohttp.ClientSession) -> str:
+    """Login to Betfair and return session token (SSOID)."""
+    headers = {
+        "X-Application": BETFAIR_APP_KEY,
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    data = {
+        "username": BETFAIR_USERNAME,
+        "password": BETFAIR_PASSWORD,
+    }
 
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            if resp.status == 401:
-                print(f"  [Betfair] {league_name}: Invalid API key")
-                return []
-            if resp.status == 429:
-                print(f"  [Betfair] {league_name}: Rate limited")
-                return []
-            if resp.status == 422:
-                # Sport key not found or no data
-                print(f"  [Betfair] {league_name}: No data available (422)")
-                return []
+        async with session.post(
+            BETFAIR_LOGIN_URL_NOCERT,
+            headers=headers,
+            data=data,
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as resp:
+            result = await resp.json()
+            if result.get("status") == "SUCCESS":
+                token = result.get("token", "")
+                print(f"  [Betfair] Login successful")
+                return token
+            else:
+                error = result.get("error", "Unknown error")
+                print(f"  [Betfair] Login failed: {error}")
+                return ""
+    except Exception as e:
+        print(f"  [Betfair] Login error: {e}")
+        return ""
+
+
+async def _betfair_api_call(session: aiohttp.ClientSession, token: str,
+                            method: str, params: dict) -> dict:
+    """Make a Betfair Exchange API call."""
+    headers = {
+        "X-Application": BETFAIR_APP_KEY,
+        "X-Authentication": token,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    url = f"{BETFAIR_API_URL}/{method}/"
+
+    try:
+        async with session.post(
+            url,
+            headers=headers,
+            json={"filter": params} if method == "listMarketCatalogue" else params,
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as resp:
             if resp.status != 200:
-                print(f"  [Betfair] {league_name}: HTTP {resp.status}")
+                text = await resp.text()
+                print(f"  [Betfair] API {method}: HTTP {resp.status} - {text[:200]}")
+                return {}
+            return await resp.json()
+    except Exception as e:
+        print(f"  [Betfair] API {method} error: {e}")
+        return {}
+
+
+async def _fetch_competition_markets(session: aiohttp.ClientSession, token: str,
+                                     league_name: str, comp_id: str) -> list[dict]:
+    """Fetch Match Odds markets for a competition."""
+    params = {
+        "eventTypeIds": [FOOTBALL_EVENT_TYPE_ID],
+        "competitionIds": [comp_id],
+        "marketTypeCodes": [MARKET_1X2],
+        "maxResults": "100",
+        "sort": "FIRST_TO_START",
+    }
+
+    # listMarketCatalogue needs special format
+    headers = {
+        "X-Application": BETFAIR_APP_KEY,
+        "X-Authentication": token,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    body = {
+        "filter": {
+            "eventTypeIds": [FOOTBALL_EVENT_TYPE_ID],
+            "competitionIds": [comp_id],
+            "marketTypeCodes": [MARKET_1X2],
+        },
+        "maxResults": "100",
+        "sort": "FIRST_TO_START",
+        "marketProjection": ["EVENT", "RUNNER_DESCRIPTION", "COMPETITION"],
+    }
+
+    url = f"{BETFAIR_API_URL}/listMarketCatalogue/"
+
+    try:
+        async with session.post(
+            url, headers=headers, json=body,
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                print(f"  [Betfair] {league_name} catalogue: HTTP {resp.status}")
+                return []
+            markets = await resp.json()
+
+            if not isinstance(markets, list) or not markets:
+                print(f"  [Betfair] {league_name}: 0 markets")
                 return []
 
-            # Check remaining quota from headers
-            remaining = resp.headers.get("x-requests-remaining", "?")
-            used = resp.headers.get("x-requests-used", "?")
+            # Now get prices for all these markets
+            market_ids = [m["marketId"] for m in markets]
 
-            data = await resp.json()
+            price_body = {
+                "marketIds": market_ids,
+                "priceProjection": {
+                    "priceData": ["EX_BEST_OFFERS"],
+                },
+            }
+
+            url2 = f"{BETFAIR_API_URL}/listMarketBook/"
+            async with session.post(
+                url2, headers=headers, json=price_body,
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as resp2:
+                if resp2.status != 200:
+                    print(f"  [Betfair] {league_name} prices: HTTP {resp2.status}")
+                    return []
+                books = await resp2.json()
+
+            # Build price lookup
+            price_map = {}
+            if isinstance(books, list):
+                for book in books:
+                    mid = book.get("marketId", "")
+                    runners = book.get("runners", [])
+                    price_map[mid] = runners
+
+            # Parse events
             events = []
+            for market in markets:
+                mid = market.get("marketId", "")
+                event_info = market.get("event", {})
+                home_name = ""
+                away_name = ""
+                event_name = event_info.get("name", "")
 
-            for event in data:
-                home = event.get("home_team", "")
-                away = event.get("away_team", "")
-                if not home or not away:
+                # Get runner names
+                runners_desc = market.get("runners", [])
+                runner_names = {}
+                for r in runners_desc:
+                    sid = r.get("selectionId")
+                    rname = r.get("runnerName", "")
+                    runner_names[sid] = rname
+                    # Betfair uses "The Draw" for draw
+                    if rname.lower() not in ["the draw", "draw"]:
+                        if not home_name:
+                            home_name = rname
+                        else:
+                            away_name = rname
+
+                if not home_name or not away_name:
                     continue
 
-                # Find Betfair bookmaker data
-                for bm in event.get("bookmakers", []):
-                    if "betfair" in bm.get("key", "").lower():
-                        # Attach home/away for name matching in parser
-                        bm["_home"] = home
-                        bm["_away"] = away
-                        odds = _parse_betfair_odds(bm)
-                        if odds and "1X2" in odds:
-                            events.append({
-                                "home": home,
-                                "away": away,
-                                "odds": odds,
-                            })
-                        break
+                # Get prices
+                runners_prices = price_map.get(mid, [])
+                odds_1x2 = {}
+                for rp in runners_prices:
+                    sid = rp.get("selectionId")
+                    rname = runner_names.get(sid, "")
+                    back_prices = rp.get("ex", {}).get("availableToBack", [])
+                    if back_prices:
+                        best_back = back_prices[0].get("price")
+                        if best_back:
+                            if rname.lower() in ["the draw", "draw"]:
+                                odds_1x2["X"] = str(best_back)
+                            elif rname == home_name:
+                                odds_1x2["1"] = str(best_back)
+                            elif rname == away_name:
+                                odds_1x2["2"] = str(best_back)
+
+                if len(odds_1x2) == 3:
+                    events.append({
+                        "home": home_name,
+                        "away": away_name,
+                        "odds": {"1X2": odds_1x2},
+                    })
 
             if events:
-                print(f"  [Betfair] {league_name}: {len(events)} events (quota: {used}/{remaining})")
+                print(f"  [Betfair] {league_name}: {len(events)} events")
             else:
                 print(f"  [Betfair] {league_name}: 0 events")
             return events
@@ -285,27 +349,32 @@ async def _fetch_league(session: aiohttp.ClientSession, league_name: str,
 
 
 async def scrape_betfair(max_matches: int = 50, days: int = 7) -> list[dict]:
-    """Main entry point â scrape Betfair odds via The Odds API."""
+    """Main entry point â scrape Betfair Exchange odds via direct API."""
     start_time = time.time()
     results = []
     seen = set()
 
-    if not ODDS_API_KEY:
-        print("  [Betfair] ODDS_API_KEY not set â skipping Betfair scraper")
+    if not BETFAIR_USERNAME or not BETFAIR_PASSWORD or not BETFAIR_APP_KEY:
+        print("  [Betfair] Missing credentials (BETFAIR_USERNAME/PASSWORD/APP_KEY) â skipping")
         return results
 
-    async with aiohttp.ClientSession(headers=HEADERS) as session:
-        # Fetch ALL leagues concurrently
+    async with aiohttp.ClientSession() as session:
+        # Step 1: Login
+        token = await _betfair_login(session)
+        if not token:
+            return results
+
+        # Step 2: Fetch all leagues concurrently
         league_tasks = []
-        for league_name, sport_key in SPORT_KEYS.items():
+        for league_name, comp_id in COMPETITION_IDS.items():
             league_tasks.append(
-                _fetch_league(session, league_name, sport_key)
+                _fetch_competition_markets(session, token, league_name, comp_id)
             )
 
         league_results = await asyncio.gather(*league_tasks, return_exceptions=True)
 
         # Collect all events
-        for i, (league_name, _) in enumerate(SPORT_KEYS.items()):
+        for i, (league_name, _) in enumerate(COMPETITION_IDS.items()):
             if isinstance(league_results[i], list):
                 for event in league_results[i]:
                     home = event["home"]
