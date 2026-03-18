@@ -214,7 +214,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
           <th data-col="bet9ja">Bet9ja <span class="sort-arrow">&#9650;</span></th>
           <th data-col="sportybet">SportyBet <span class="sort-arrow">&#9650;</span></th>
           <th data-col="msport">MSport <span class="sort-arrow">&#9650;</span></th>
-            <th data-col="betgr8">Betgr8 <span class="sort-arrow">&#9650;</span></th>
+            <th data-col="betgr8">YaJuego <span class="sort-arrow">&#9650;</span></th>
           <th data-col="betfair">Betfair <span class="sort-arrow">&#9650;</span></th>
           <th data-col="diff">Best Diff <span class="sort-arrow">&#9650;</span></th>
         </tr>
@@ -232,7 +232,7 @@ tr:hover td{{background:rgba(99,102,241,.05)}}
     <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="bet9ja" checked> Bet9ja</label>
     <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="sportybet" checked> SportyBet</label>
     <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="msport" checked> MSport</label>
-    <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="betgr8" checked> Betgr8</label>
+    <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="betgr8" checked> YaJuego</label>
         <label style="color:#e2e8f0;font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:4px;"><input type="checkbox" class="bm-check" value="betfair" checked> Betfair</label>
   </div>
   <div class="acca-loading" id="acca-loading" style="display:none">Generating comparison&hellip;</div>
@@ -315,7 +315,7 @@ const BOOKMAKERS = [
   {{key: 'bet9ja', name: 'Bet9ja', cls: 'bet9ja'}},
   {{key: 'sportybet', name: 'SportyBet', cls: 'sportybet'}},
   {{key: 'msport', name: 'MSport', cls: 'msport'}},
-    {{key: 'betgr8', name: 'Betgr8', cls: 'betgr8'}},
+    {{key: 'betgr8', name: 'YaJuego', cls: 'betgr8'}},
     {{key: 'betfair', name: 'Betfair', cls: 'betfair'}},
 ];
 
@@ -641,7 +641,7 @@ function createAccaCard(acca, idx) {{
 
   const BOOKS = ['bet9ja','sportybet','msport','betgr8','betfair'];
   const COLORS = {{'bet9ja':'#22c55e','sportybet':'#f59e0b','msport':'#ef4444','betgr8':'#8b5cf6','betfair':'#3b82f6'}};
-  const LABELS = {{'bet9ja':'BET9JA','sportybet':'SPORTYBET','msport':'MSPORT','betgr8':'BETGR8','betfair':'BETFAIR'}};
+  const LABELS = {{'bet9ja':'BET9JA','sportybet':'SPORTYBET','msport':'MSPORT','betgr8':'YAJUEGO','betfair':'BETFAIR'}};
 
   const sels = acca.selections || [];
   const returns = acca.returns || {{}};
