@@ -88,6 +88,7 @@ cache = {
     "raw_betano": [],
     "raw_betgr8": [],
     "match_name_map": {},
+    "last_errors": [],
 }
 
 # Dummy user database (replace with real DB in production)
@@ -255,6 +256,7 @@ async def do_refresh():
         cache["status"] = f"Updated at {datetime.now().strftime('%H:%M:%S')}"
         if errors:
             cache["status"] += f" ({len(errors)} errors)"
+            cache["last_errors"] = errors
 
     except asyncio.TimeoutError:
         cache["status"] = f"Error: Refresh timeout after {GATHER_TIMEOUT_SECONDS}s"
@@ -432,6 +434,16 @@ async def get_odds_by_league(league: str, current_user: str = Depends(get_curren
         "league": league,
         "rows": filtered,
         "count": len(filtered),
+    })
+
+
+@app.get("/api/errors")
+async def get_errors(current_user: str = Depends(get_current_user)):
+    """Get last scraper errors for debugging."""
+    return JSONResponse({
+        "errors": cache.get("last_errors", []),
+        "status": cache["status"],
+        "last_updated": cache["last_updated"],
     })
 
 
