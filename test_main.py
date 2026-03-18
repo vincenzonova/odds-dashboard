@@ -217,7 +217,7 @@ class TestMergeOdds:
             ],
             "sportybet": [],
             "msport": [],
-            "betgr8": [],
+            "yajuego": [],
         }
         rows = merge_odds(raw)
         assert len(rows) == 3  # 3 signs in 1X2
@@ -237,7 +237,7 @@ class TestMergeOdds:
                 })
             ],
             "msport": [],
-            "betgr8": [],
+            "yajuego": [],
         }
         rows = merge_odds(raw)
         assert len(rows) == 3
@@ -259,7 +259,7 @@ class TestMergeOdds:
                 })
             ],
             "msport": [],
-            "betgr8": [],
+            "yajuego": [],
         }
         rows = merge_odds(raw)
         assert len(rows) == 1
@@ -279,7 +279,7 @@ class TestMergeOdds:
                 })
             ],
             "msport": [],
-            "betgr8": [],
+            "yajuego": [],
         }
         rows = merge_odds(raw)
         # Should merge into 1 row, not 2 separate rows
@@ -301,7 +301,7 @@ class TestMergeOdds:
                 })
             ],
             "msport": [],
-            "betgr8": [],
+            "yajuego": [],
         }
         rows = merge_odds(raw)
         # Should merge into 3 rows (1, X, 2)
@@ -317,7 +317,7 @@ class TestMergeOdds:
             "bet9ja": [],
             "sportybet": [],
             "msport": [],
-            "betgr8": [],
+            "yajuego": [],
         }
         rows = merge_odds(raw)
         assert rows == []
@@ -332,7 +332,7 @@ class TestMergeOdds:
             ],
             "sportybet": [],
             "msport": [],
-            "betgr8": [],
+            "yajuego": [],
         }
         rows = merge_odds(raw)
         assert len(rows) == 5  # 3 from 1X2 + 2 from O/U
@@ -353,7 +353,7 @@ class TestMergeOdds:
                 }
             ],
             "msport": [],
-            "betgr8": [],
+            "yajuego": [],
         }
         rows = merge_odds(raw)
         assert len(rows) == 3
@@ -371,7 +371,7 @@ class TestMergeOdds:
                 }
             ],
             "msport": [],
-            "betgr8": [],
+            "yajuego": [],
         }
         rows = merge_odds(raw)
         assert len(rows) == 0, "Events without Bet9ja should be filtered out"
@@ -500,7 +500,7 @@ class TestConfiguration:
 
     def test_scraper_timeouts_all_set(self):
         from main import SCRAPER_TIMEOUTS
-        required = ["Bet9ja", "SportyBet", "MSport", "Betgr8"]
+        required = ["Bet9ja", "SportyBet", "MSport", "YaJuego"]
         for bk in required:
             assert bk in SCRAPER_TIMEOUTS, f"Missing timeout for {bk}"
             assert SCRAPER_TIMEOUTS[bk] > 0
@@ -511,7 +511,7 @@ class TestConfiguration:
         from main import merge_odds
         import inspect
         source = inspect.getsource(merge_odds)
-        for bk in ["bet9ja", "sportybet", "msport", "betgr8"]:
+        for bk in ["bet9ja", "sportybet", "msport", "yajuego"]:
             assert bk in source, f"Bookmaker '{bk}' missing from merge_odds"
 
 
@@ -543,9 +543,9 @@ class TestImports:
         import msport_scraper
         assert hasattr(msport_scraper, "scrape_msport")
 
-    def test_import_betgr8_scraper(self):
-        import betgr8_scraper
-        assert hasattr(betgr8_scraper, "scrape_betgr8")
+    def test_import_yajuego_scraper(self):
+        import yajuego_scraper
+        assert hasattr(yajuego_scraper, "scrape_yajuego")
 
     def test_import_betslip_checker(self):
         import betslip_checker
