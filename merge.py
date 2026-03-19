@@ -493,7 +493,7 @@ def merge_odds(raw_data: dict) -> list:
     Uses a unified event index built from all bookmakers, with league-based grouping
     for faster and more accurate matching.
     """
-    BOOKMAKERS = ["bet9ja", "sportybet", "msport", "yajuego", "betfair"]  # betking & betano PAUSED
+    BOOKMAKERS = ["bet9ja", "sportybet", "msport", "yajuego", "betfair"]  # betking, betano & betgr8 PAUSED
 
     # Build league index: league -> {event_key -> event_data}
     league_index = {}

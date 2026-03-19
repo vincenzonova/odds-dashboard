@@ -23,7 +23,7 @@ from sportybet_scraper import scrape_sportybet
 # from betking_scraper import scrape_betking  # PAUSED - geo-blocked
 from msport_scraper import scrape_msport
 from yajuego_scraper import scrape_yajuego
-from betfair_scraper import scrape_betfair
+# from betfair_scraper import scrape_betfair  # PAUSED — reducing resource pressure on staging
 # from betgr8_scraper import scrape_betgr8  # PAUSED
 # from betano_scraper import scrape_betano  # PAUSED - timeout issues
 
@@ -90,7 +90,7 @@ cache = {
     "raw_msport": [],
     "raw_betano": [],
     "raw_yajuego": [],
-    "raw_betfair": [],
+    # "raw_betfair": [],  # PAUSED
     "match_name_map": {},
     "last_errors": [],
 }
@@ -216,20 +216,18 @@ async def do_refresh():
         # Run Bet9ja (API) in parallel with Playwright scrapers run sequentially
         # to avoid memory pressure from 3+ concurrent headless browsers
         async def _run_playwright_scrapers():
-            """Run Playwright scrapers in parallel with asyncio.gather."""
-            r1, r2 = await asyncio.gather(
-                safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
-                safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, MSPORT_MIN_DAYS)),
-            )
+            """Run Playwright scrapers sequentially (one browser at a time)."""
+            r1 = await safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES, days=SCRAPE_DAYS)
+            r2 = await safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, MSPORT_MIN_DAYS))
             return [r1, r2]
 
-        bet9ja_result, yajuego_result, betfair_result, playwright_results = await asyncio.gather(
+        # API scrapers (Bet9ja, YaJuego) run in parallel with sequential Playwright scrapers
+        bet9ja_result, yajuego_result, playwright_results = await asyncio.gather(
             safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, BET9JA_MIN_DAYS)),
             safe_scrape("YaJuego", scrape_yajuego, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
-            safe_scrape("Betfair", scrape_betfair, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
             _run_playwright_scrapers(),
         )
-        results = [bet9ja_result, yajuego_result, betfair_result] + playwright_results
+        results = [bet9ja_result, yajuego_result] + playwright_results
 
         # Store raw data
         raw_data = {}
@@ -260,7 +258,6 @@ async def do_refresh():
         cache["status"] = f"Updated at {datetime.now().strftime('%H:%M:%S')}"
         if errors:
             cache["status"] += f" ({len(errors)} errors)"
-            cache["last_errors"] = errors
             cache["last_errors"] = errors
 
     except asyncio.TimeoutError:
