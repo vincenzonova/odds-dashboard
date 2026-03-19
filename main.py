@@ -223,8 +223,10 @@ async def do_refresh():
             )
             return [r1, r2]
 
-        bet9ja_result, playwright_results = await asyncio.gather(
+        bet9ja_result, yajuego_result, betfair_result, playwright_results = await asyncio.gather(
             safe_scrape("Bet9ja", scrape_bet9ja, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, BET9JA_MIN_DAYS)),
+            safe_scrape("YaJuego", scrape_yajuego, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
+            safe_scrape("Betfair", scrape_betfair, max_matches=MAX_MATCHES, days=SCRAPE_DAYS),
             _run_playwright_scrapers(),
         )
         results = [bet9ja_result, yajuego_result, betfair_result] + playwright_results
