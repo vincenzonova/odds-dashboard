@@ -102,7 +102,7 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 | bet9ja_scraper.py | 6KB | Bet9ja API scraper (aiohttp, no browser) |
 | sportybet_scraper.py | 15KB | SportyBet Playwright scraper (JS injection) |
 | msport_scraper.py | 22KB | MSport Playwright scraper (multi-pass: 1X2, O/U, DC) |
-| betgr8_scraper.py | 16KB | Betgr8 Playwright scraper (multi-league, multi-market) |
+| betgr8_scraper.py | 34KB | Betgr8 Playwright scraper (multi-league, multi-market) |
 | betking_scraper.py | 14KB | BetKing scraper (PAUSED - geo-blocked) |
 | betano_scraper.py | 14KB | Betano scraper (PAUSED) |
 | betslip_checker.py | 26KB | Betslip/accumulator checking logic |
@@ -144,7 +144,7 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 
 ## Authentication
 - JWT tokens stored in HTTP-only cookies
-- Users: admin (admin123), vinz (odds2026), paulo (paulo2026), alessandro (alessandro2026)
+- Users: admin (admin123), vinz (odds2026)
 - Passwords hashed with bcrypt
 
 ## Deployment
@@ -152,7 +152,7 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 - **Auto-deploy**: Pushes to main branch trigger automatic deployment
 - **URL**: odds-dashboard-production.up.railway.app
 - **Build**: Dockerfile installs Python deps + Playwright Chromium
-- **CI**: GitHub Actions runs pytest on every push to main and staging branches
+- **CI**: GitHub Actions runs pytest on every push
 
 ### Betslip Service Deployment
 
@@ -161,24 +161,6 @@ Railway containers have NO persistent storage. Each deployment starts with a fre
 - **URL**: innovative-tranquility-production.up.railway.app
 - **Start command**: uvicorn betslip_service:app --host 0.0.0.0 --port 8080
 - **Auto-deploy**: Same repo, pushes to main trigger deployment
-
-
-
-### Staging Environment (MANDATORY — all changes go here first)
-- **Branch**: staging (created from main)
-- **Railway service**: stunning-vibrancy
-- **URL**: stunning-vibrancy-production-a011.up.railway.app
-- **Region**: europe-west4-drams3a (EU West Amsterdam — same as production)
-- **Required env var**: PORT=8000 (must be set on Railway service; without it, Railway returns 502)
-- **Purpose**: ALL changes must be validated on staging before merging to main/production
-- **Auto-deploy**: Pushes to staging branch trigger automatic deployment
-- **Workflow**: staging branch → validate → merge to main → production auto-deploys
-- **Scraper wait time optimizations** (staging only):
-  - Betgr8: WAIT_SECONDS=3 (prod: 5), settle time=1s (prod: 2s), dropdown wait=1s (prod: 1.5s)
-  - MSport: DOM render=2s (prod: 3s), dropdown=500ms (prod: 800ms), odds update=1.5s (prod: 2.5s)
-  - SportyBet: unchanged (already optimized)
-  - Bet9ja: unchanged (API-based, no browser waits)
-- **Speed comparison results** (March 2026): Both staging and production run ~5 min scraper cycles. The wait-time reductions showed no meaningful improvement because SportyBet (~5 min) is the bottleneck and all Playwright scrapers run in parallel via asyncio.gather. Individual scraper improvements are masked by the slowest parallel task.
 
 ## Known Gotchas
 
