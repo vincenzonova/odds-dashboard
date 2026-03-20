@@ -9,7 +9,7 @@ Dashboard HTML builder - 5-bookmaker odds dashboard with:
 """
 
 
-def build_dashboard_html(cache: dict) > str:
+def build_dashboard_html(cache: dict) -> str:
     import json
     from datetime import datetime
 
