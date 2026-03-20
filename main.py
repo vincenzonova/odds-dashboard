@@ -1398,7 +1398,7 @@ async def get_bookmakers(current_user: str = Depends(get_current_user)):
 # ============================================================================
 
 LOGIN_HTML = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Odds Dashboard - Login</title>
+<html><head><link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzYzNjZmMSIvPjxwYXRoIGQ9Ik0xOCA0TDEwIDE4aDVsLTMgMTAgMTAtMTRoLTV6IiBmaWxsPSIjZmZmIi8+PC9zdmc+"/><meta charset="utf-8"><title>Odds Dashboard - Login</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0f1923;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh}

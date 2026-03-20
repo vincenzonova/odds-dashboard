@@ -820,7 +820,7 @@ def build_dashboard_html(cache: dict) -> str:
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Odds Dashboard - 5 Bookmakers</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzYzNjZmMSIvPjxwYXRoIGQ9Ik0xOCA0TDEwIDE4aDVsLTMgMTAgMTAtMTRoLTV6IiBmaWxsPSIjZmZmIi8+PC9zdmc+"/> <title>Odds Dashboard - 5 Bookmakers</title>
 <style>
 /* -- Reset & Base ---------------------------------- */
 *{{margin:0;padding:0;box-sizing:border-box}}
