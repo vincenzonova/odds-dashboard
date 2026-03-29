@@ -1,4 +1,4 @@
-""" 
+"""  
 SportyBet Scraper - uses Playwright to render the page and extract odds from DOM.
 Needed because SportyBet's API requires session cookies set by their JS framework.
 Extracts:
