@@ -501,9 +501,17 @@ async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ],
         )
-        page = await browser.new_page()
+        context = await browser.new_context(
+            ignore_https_errors=True,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        )
+        page = await context.new_page()
 
         # Block images/fonts for speed
         await page.route(
@@ -531,6 +539,9 @@ async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
                 page, date_str, is_today, seen, max_matches - len(results)
             )
             results.extend(day_results)
+
+        await context.close()
+
 
         await browser.close()
 
