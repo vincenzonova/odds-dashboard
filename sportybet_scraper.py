@@ -404,6 +404,10 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
         await context.close()
 
 
+        await context.close()
+
+
+
         await browser.close()
 
     print(f"  [SportyBet] Done - {len(results)} matches total")
