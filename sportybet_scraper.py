@@ -4,7 +4,7 @@ Needed because SportyBet's API requires session cookies set by their JS framewor
 Extracts:
   - 1X2 odds (from the default "3 Way & O/U" tab)
   - Over/Under 2.5 (only when the displayed spread is actually 2.5)
-  - Over/Under 1.5 (by clicking spread dropdown to select 1.5)
+  - Over/Under 1.5 (by clicking spread dropdown to select 1.5)z
   - Double Chance (by clicking the "Double Chance" tab)
 """
 
