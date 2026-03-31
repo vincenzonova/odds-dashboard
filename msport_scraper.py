@@ -504,7 +504,6 @@ async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
             ],
         )
         context = await browser.new_context(
@@ -512,6 +511,13 @@ async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )
         page = await context.new_page()
+        # Anti-bot stealth: hide webdriver flag
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            window.chrome = {runtime: {}};
+        """)
 
         # Block images/fonts for speed
         await page.route(
