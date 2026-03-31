@@ -4,7 +4,7 @@ Needed because SportyBet's API requires session cookies set by their JS framewor
 Extracts:
   - 1X2 odds (from the default "3 Way & O/U" tab)
   - Over/Under 2.5 (only when the displayed spread is actually 2.5)
-  - Over/Under 1.5 (by clicking spread dropdown to select 1.5)
+  - Over/Under 1.5 (by clicking spread dropdown to select 1.5
   - Double Chance (by clicking the "Double Chance" tab)
 """
 
@@ -376,7 +376,6 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
             ],
         )
         context = await browser.new_context(
@@ -384,6 +383,13 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )
         page = await context.new_page()
+        # Anti-bot stealth: hide webdriver flag
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            window.chrome = {runtime: {}};
+        """)
         await page.route(
             "**/*.{png,jpg,jpeg,gif,webp,woff,woff2,svg}",
             lambda r: r.abort(),
@@ -400,9 +406,6 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
             except Exception as e:
                 print(f"  [SportyBet] {league_name} error: {e}")
                 continue
-
-        await context.close()
-
 
         await context.close()
 
