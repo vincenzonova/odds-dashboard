@@ -595,3 +595,169 @@ class TestAPIEndpoints:
         data = resp.json()
         assert "size" in data
         assert "selections" in data
+
+# ═══════════════════════════════════════════════════════════════════════
+# 11. PLAYWRIGHT SCRAPER PATTERN VALIDATION
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestPlaywrightScraperPattern:
+    """
+    Validate that Playwright scrapers follow the required pattern:
+    - No --disable-blink-features=AutomationControlled (crashes headless_shell)
+    - JS stealth via add_init_script (webdriver, languages, plugins, chrome)
+    - Browser context with ignore_https_errors=True
+    - Proper cleanup (context.close + browser.close, no duplicates)
+    """
+
+    def _read_scraper_source(self, module_name):
+        """Read the source code of a scraper module."""
+        import inspect
+        import importlib
+        mod = importlib.import_module(module_name)
+        return inspect.getsource(mod)
+
+    # --- SportyBet ---
+
+    def test_sportybet_no_disable_blink_features(self):
+        """SportyBet must NOT use --disable-blink-features (crashes headless_shell)."""
+        source = self._read_scraper_source("sportybet_scraper")
+        assert "disable-blink-features" not in source, (
+            "sportybet_scraper.py contains --disable-blink-features which crashes "
+            "chromium_headless_shell. Use page.add_init_script() for stealth instead."
+        )
+
+    def test_sportybet_has_stealth_init_script(self):
+        """SportyBet must use JS stealth via add_init_script."""
+        source = self._read_scraper_source("sportybet_scraper")
+        assert "add_init_script" in source, (
+            "sportybet_scraper.py missing add_init_script() for JS stealth"
+        )
+        assert "navigator" in source and "webdriver" in source, (
+            "sportybet_scraper.py stealth should hide navigator.webdriver"
+        )
+    def test_sportybet_uses_browser_context(self):
+        """SportyBet must create a browser context (not use browser.new_page directly)."""
+        source = self._read_scraper_source("sportybet_scraper")
+        assert "new_context" in source, (
+            "sportybet_scraper.py must use browser.new_context() for proper SSL handling"
+        )
+        assert "ignore_https_errors" in source, (
+            "sportybet_scraper.py must set ignore_https_errors=True in browser context"
+        )
+
+    def test_sportybet_proper_cleanup(self):
+        """SportyBet must close context then browser, without duplicate close calls."""
+        source = self._read_scraper_source("sportybet_scraper")
+        assert "context.close()" in source or "await context.close()" in source, (
+            "sportybet_scraper.py must close the browser context"
+        )
+        assert "browser.close()" in source or "await browser.close()" in source, (
+            "sportybet_scraper.py must close the browser"
+        )
+        # Check for duplicate context.close() calls
+        close_count = source.count("context.close()")
+        assert close_count == 1, (
+            f"sportybet_scraper.py has {close_count} context.close() calls "
+            f"(expected exactly 1 — duplicate close throws an error)"
+        )
+
+    # --- MSport ---
+
+    def test_msport_no_disable_blink_features(self):
+        """MSport must NOT use --disable-blink-features (crashes headless_shell)."""
+        source = self._read_scraper_source("msport_scraper")
+        assert "disable-blink-features" not in source, (
+            "msport_scraper.py contains --disable-blink-features which crashes "
+            "chromium_headless_shell. Use page.add_init_script() for stealth instead."
+        )
+
+    def test_msport_has_stealth_init_script(self):
+        """MSport must use JS stealth via add_init_script."""
+        source = self._read_scraper_source("msport_scraper")
+        assert "add_init_script" in source, (
+            "msport_scraper.py missing add_init_script() for JS stealth"
+        )
+        assert "navigator" in source and "webdriver" in source, (
+            "msport_scraper.py stealth should hide navigator.webdriver"
+        )
+    def test_msport_uses_browser_context(self):
+        """MSport must create a browser context."""
+        source = self._read_scraper_source("msport_scraper")
+        assert "new_context" in source, (
+            "msport_scraper.py must use browser.new_context() for proper SSL handling"
+        )
+        assert "ignore_https_errors" in source, (
+            "msport_scraper.py must set ignore_https_errors=True in browser context"
+        )
+
+    def test_msport_proper_cleanup(self):
+        """MSport must close context then browser."""
+        source = self._read_scraper_source("msport_scraper")
+        assert "context.close()" in source or "await context.close()" in source, (
+            "msport_scraper.py must close the browser context"
+        )
+        assert "browser.close()" in source or "await browser.close()" in source, (
+            "msport_scraper.py must close the browser"
+        )
+
+    # --- General Playwright pattern ---
+
+    def test_no_scraper_uses_automation_controlled_flag(self):
+        """No scraper should use the --disable-blink-features flag."""
+        scraper_modules = [
+            "sportybet_scraper",
+            "msport_scraper",
+        ]
+        for mod_name in scraper_modules:
+            source = self._read_scraper_source(mod_name)
+            assert "AutomationControlled" not in source, (
+                f"{mod_name}.py contains AutomationControlled flag which is "
+                f"incompatible with chromium_headless_shell"
+            )
+
+    def test_all_playwright_scrapers_have_user_agent(self):
+        """All Playwright scrapers should set a custom user agent."""
+        scraper_modules = [
+            "sportybet_scraper",
+            "msport_scraper",
+        ]
+        for mod_name in scraper_modules:
+            source = self._read_scraper_source(mod_name)
+            assert "user_agent" in source, (
+                f"{mod_name}.py should set a custom user_agent in browser context"
+            )
+
+    def test_all_playwright_scrapers_have_no_sandbox(self):
+        """All Playwright scrapers should use --no-sandbox for Docker compatibility."""
+        scraper_modules = [
+            "sportybet_scraper",
+            "msport_scraper",
+        ]
+        for mod_name in scraper_modules:
+            source = self._read_scraper_source(mod_name)
+            assert "--no-sandbox" in source, (
+                f"{mod_name}.py should use --no-sandbox for Docker/Railway"
+            )
+
+# ═══════════════════════════════════════════════════════════════════════
+# 12. HEALTH AND DEBUG ENDPOINT TESTS
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestHealthEndpoints:
+    """Test unauthenticated health/debug endpoints."""
+
+    def test_health_endpoint(self):
+        from fastapi.testclient import TestClient
+        from main import app
+        client = TestClient(app)
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "last_updated" in data or "is_refreshing" in data
+
+    def test_debug_connectivity_endpoint(self):
+        from fastapi.testclient import TestClient
+        from main import app
+        client = TestClient(app)
+        resp = client.get("/debug/connectivity")
+        assert resp.status_code == 200

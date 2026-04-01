@@ -1,10 +1,10 @@
-"""
+"""  
 SportyBet Scraper - uses Playwright to render the page and extract odds from DOM.
 Needed because SportyBet's API requires session cookies set by their JS framework.
 Extracts:
   - 1X2 odds (from the default "3 Way & O/U" tab)
   - Over/Under 2.5 (only when the displayed spread is actually 2.5)
-  - Over/Under 1.5 (by clicking spread dropdown to select 1.5)
+  - Over/Under 1.5 (by clicking spread dropdown to select 1.5
   - Double Chance (by clicking the "Double Chance" tab)
 """
 
@@ -373,7 +373,10 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ],
         )
         context = await browser.new_context(
             ignore_https_errors=True,
@@ -405,6 +408,9 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
                 continue
 
         await context.close()
+
+
+
         await browser.close()
 
     print(f"  [SportyBet] Done - {len(results)} matches total")

@@ -501,7 +501,10 @@ async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ],
         )
         context = await browser.new_context(
             ignore_https_errors=True,
@@ -544,6 +547,8 @@ async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
             results.extend(day_results)
 
         await context.close()
+
+
         await browser.close()
 
     print(f"  [MSport] Done - {len(results)} matches total")
