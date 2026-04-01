@@ -3,15 +3,16 @@
 ## File Overview
 
 | File | Size | Purpose |
-|------|------|---------| 
+|------|------|--------|
 | `main.py` | ~658 lines | Core app: FastAPI routes, auth, cache, scheduler, dashboard entry (imports merge logic from merge.py) |
 | `merge.py` | ~616 lines | Team matching and odds merging: TEAM_ALIASES, SIGN_SWAP_MAP, _normalize_team, _team_sim, fuzzy_match_event, merge_odds |
 | `dashboard.py` | ~32KB | Dashboard HTML/JS/CSS template (rendered inside Python f-string) |
 | `bet9ja_scraper.py` | ~6KB | Bet9ja API scraper (aiohttp, no browser needed) |
-| `sportybet_scraper.py` | ~15KB | SportyBet Playwright scraper with JS injection |
-| `msport_scraper.py` | ~22KB | MSport Playwright scraper (multi-pass: 1X2, O/U, DC) |
+| `sportybet_scraper.py` | ~15KB | SportyBet Playwright scraper with JS stealth and browser context |
+| `msport_scraper.py` | ~22KB | MSport Playwright scraper (multi-pass: 1X2, O/U, DC) with JS stealth |
 | `yajuego_scraper.py` | ~34KB | YaJuego API scraper (multi-league, multi-market) |
 | `betfair_scraper.py` | ~28KB | Betfair API scraper (currently paused) |
+| `betgr8_scraper.py` | - | Betgr8 Playwright scraper |
 | `betslip_checker.py` | ~26KB | Accumulator/betslip checking logic |
 | `betslip_scraper.py` | ~15KB | Live betslip scraper (Playwright-based, separate browser) |
 | `debug_routes.py` | ~2KB | Debug API endpoints |
@@ -20,21 +21,22 @@
 ## Configuration Constants (main.py)
 
 ```python
-SECRET_KEY = "your-secret-key-change-in-production"  # L44 — JWT secret
-MAX_MATCHES = 100          # L45 — max matches per scraper
-SCRAPE_DAYS = 2            # L46 — default days ahead
-MSPORT_MIN_DAYS = 7        # L47 — MSport needs wider window
-BET9JA_MIN_DAYS = 7        # L48 — Bet9ja needs wider window
+SECRET_KEY           = "your-secret-key-change-in-production"  # L44 — JWT secret
+MAX_MATCHES          = 100    # L45 — max matches per scraper
+SCRAPE_DAYS          = 2      # L46 — default days ahead
+MSPORT_MIN_DAYS      = 7      # L47 — MSport needs wider window
+BET9JA_MIN_DAYS      = 7      # L48 — Bet9ja needs wider window
 REFRESH_INTERVAL_MINUTES = 5  # L49 — auto-refresh interval
-DB_PATH = "odds_history.db"   # L50 — SQLite (ephemeral on Railway)
-SCRAPER_TIMEOUTS = {       # L51-58
+DB_PATH              = "odds_history.db"  # L50 — SQLite (ephemeral on Railway)
+
+SCRAPER_TIMEOUTS = {          # L51-58
     "bet9ja": 60,
     "sportybet": 420,
     "msport": 600,
     "yajuego": 420,
 }
-DEFAULT_SCRAPER_TIMEOUT = 120  # L59
-GATHER_TIMEOUT_SECONDS = 600   # L60 — total gather timeout
+DEFAULT_SCRAPER_TIMEOUT = 120 # L59
+GATHER_TIMEOUT_SECONDS  = 600 # L60 — total gather timeout
 ```
 
 ## TEAM_ALIASES (merge.py L25-L400)
@@ -78,7 +80,6 @@ The core merging function. Takes raw scraper output keyed by bookmaker name and 
 ### SIGN_SWAP_MAP (merge.py L21)
 
 When team order is reversed between bookmakers, odds signs must be swapped:
-
 ```python
 SIGN_SWAP_MAP = {
     "1": "2", "2": "1", "X": "X",
@@ -108,37 +109,82 @@ Creates the SQLite `odds_history` table if it doesn't exist. Called at startup.
 
 Persists merged odds rows to SQLite. Note: Railway has no persistent storage, so this data is lost on redeploy.
 
+## Playwright Scraper Pattern (CRITICAL — updated April 2026)
+
+All Playwright scrapers (SportyBet, MSport, Betgr8) MUST follow this exact pattern. Failure to do so will crash the scrapers in production.
+
+### Why this pattern exists
+
+Playwright v1.49 uses `chromium_headless_shell` (not full Chromium) for headless mode. This lightweight binary:
+- Does NOT support `--disable-blink-features=AutomationControlled` (causes immediate crash)
+- Requires JavaScript-based stealth instead of Chrome flag-based stealth
+- Requires a browser context for `ignore_https_errors` and custom user agents
+
+### Required code pattern
+
+```python
+async with async_playwright() as pw:
+    browser = await pw.chromium.launch(
+        headless=True,
+        args=["--no-sandbox", "--disable-dev-shm-usage"],
+        # NEVER add --disable-blink-features=AutomationControlled
+    )
+    context = await browser.new_context(
+        ignore_https_errors=True,
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    )
+    page = await context.new_page()
+    await page.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+        window.chrome = {runtime: {}};
+    """)
+    try:
+        # ... scraper logic ...
+    finally:
+        await context.close()
+        await browser.close()
+```
+
+### Common mistakes to avoid
+
+1. **Adding `--disable-blink-features=AutomationControlled`** to launch args → Crashes immediately
+2. **Using `browser.new_page()` directly** instead of creating a context → Can't set `ignore_https_errors`
+3. **Calling `context.close()` twice** → Second call throws an error
+4. **Forgetting the stealth init script** → Bookmaker sites detect automation and block
+
 ## Scraper Architecture
 
 ### Bet9ja (bet9ja_scraper.py)
-
 - **Type**: Pure API scraper using aiohttp (no browser)
 - **Approach**: Calls Bet9ja's internal API endpoints to fetch prematch odds
 - **Speed**: Fastest scraper (~60s timeout)
 - **Markets**: 1X2, Over/Under, Double Chance
+- **Note**: GROUP IDs are season-specific. Current (2025/26): CL=1185641, EL=1185689, ECL=1946188
 
 ### SportyBet (sportybet_scraper.py)
-
-- **Type**: Playwright browser automation with JS injection
+- **Type**: Playwright browser automation with JS stealth and browser context
 - **Approach**: Navigates to league pages, injects `JS_EXTRACT_MAIN` to query DOM elements
 - **DOM selectors**: `.match-row`, `.home-team`, `.away-team`, `.m-outcome-odds`
 - **Odds mapping**: First 3 odds = 1X2 (Home, Draw, Away); indices 3-4 = Over/Under
 - **Leagues**: PL, La Liga, Serie A, Bundesliga, Ligue 1, CL, EL (via TOURNAMENT_URLS)
+- **Anti-bot**: JS stealth via `page.add_init_script()` (NOT Chrome flags)
+- **SSL**: Uses `ignore_https_errors=True` in browser context (SportyBet has cert issues)
 
 ### MSport (msport_scraper.py)
-
-- **Type**: Playwright browser automation
+- **Type**: Playwright browser automation with JS stealth and browser context
 - **Approach**: Multi-pass scraping — separate passes for 1X2, Over/Under, and Double Chance
+- **DOM selectors**: `.m-tournament` (5), `.m-event` (50), `.m-outcome` (250), `.odds` (250), `.select-box` (18)
 - **Timeout**: 600s (longest, due to multi-pass)
+- **Anti-bot**: JS stealth via `page.add_init_script()` (NOT Chrome flags)
 
 ### YaJuego (yajuego_scraper.py)
-
 - **Type**: REST API
 - **Approach**: Multi-league, multi-market scraping via API endpoints
 - **Size**: ~34KB
 
 ### Betfair (betfair_scraper.py) — PAUSED
-
 - **Type**: REST API
 - **Approach**: Exchange odds via Betfair API
 - **Size**: ~28KB
@@ -155,8 +201,11 @@ Persists merged odds rows to SQLite. Note: Railway has no persistent storage, so
 | `/api/odds/{league}` | GET | Yes | Odds filtered by league |
 | `/api/status` | GET | Yes | Scraper status and last refresh time |
 | `/api/refresh` | POST | Yes | Trigger manual refresh |
+| `/api/errors` | GET | Yes | Last scraper errors per bookmaker |
 | `/api/custom-comparison` | POST | Yes | Calculate returns for selected events across bookmakers |
 | `/api/live-comparison` | POST | Yes | Live betslip scraping via separate Playwright browser |
+| `/debug/connectivity` | GET | No | Tests DNS/TCP/HTTP to bookmaker sites |
+| `/health` | GET | No | Returns last_updated and is_refreshing status |
 
 ## Authentication
 
@@ -188,5 +237,6 @@ Uses pytest. Key test areas:
 - Merge logic with mock scraper data
 - Sign swapping for reversed team orders
 - API endpoint auth requirements
-
-**Known issue**: Lines 532-1062 are an exact duplicate of lines 1-531. Python silently overrides the first class definitions with the second, so tests still pass but the file is bloated.
+- Scraper source code validation (no incompatible flags, stealth present)
+- Configuration validation
+- Import smoke tests
