@@ -375,7 +375,18 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
-        page = await browser.new_page()
+        context = await browser.new_context(
+            ignore_https_errors=True,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        )
+        page = await context.new_page()
+        # Anti-bot stealth: hide webdriver flag
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            window.chrome = {runtime: {}};
+        """)
         await page.route(
             "**/*.{png,jpg,jpeg,gif,webp,woff,woff2,svg}",
             lambda r: r.abort(),
@@ -393,6 +404,7 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
                 print(f"  [SportyBet] {league_name} error: {e}")
                 continue
 
+        await context.close()
         await browser.close()
 
     print(f"  [SportyBet] Done - {len(results)} matches total")
