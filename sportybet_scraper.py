@@ -9,6 +9,7 @@ Extracts:
 """
 
 import asyncio
+import traceback
 from playwright.async_api import async_playwright
 from difflib import SequenceMatcher
 
@@ -366,7 +367,7 @@ async def _scrape_league(page, league_name: str, url: str, seen: set,
     return league_matches
 
 
-async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
+async def _scrape_sportybet_once(max_matches: int = 50, days: int = 2) -> list[dict]:
     results = []
     seen = set()
 
@@ -420,6 +421,22 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
     print(f"  [SportyBet] Done - {len(results)} matches total")
     return results
 
+
+async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
+    """Wrapper with automatic retry logic for browser crash resilience."""
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            return await _scrape_sportybet_once(max_matches=max_matches, days=days)
+        except Exception as e:
+            print(f"  [SportyBet] Attempt {attempt}/{max_retries} failed: {e}")
+            if attempt < max_retries:
+                print(f"  [SportyBet] Retrying in 5 seconds...")
+                await asyncio.sleep(5)
+            else:
+                print(f"  [SportyBet] All {max_retries} attempts failed")
+                traceback.print_exc()
+                return []
 
 if __name__ == "__main__":
     import json
