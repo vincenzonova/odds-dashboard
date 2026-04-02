@@ -376,6 +376,9 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--single-process",
             ],
         )
         context = await browser.new_context(
