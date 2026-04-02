@@ -25,6 +25,7 @@ DOM structure:
 """
 
 import asyncio
+import traceback
 from datetime import datetime, timedelta
 from playwright.async_api import async_playwright
 
@@ -489,7 +490,7 @@ async def _scrape_date(page, date_str: str, is_today: bool, seen: set, max_match
     return results
 
 
-async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
+async def _scrape_msport_once(max_matches: int = 200, days: int = 2) -> list:
     """Main entry point for scraping MSport data.
 
     Loads matches for the specified number of days (default 2).
@@ -566,6 +567,22 @@ async def main():
     matches = await scrape_msport(max_matches=200)
     print(json.dumps(matches, indent=2))
 
+
+async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
+    """Wrapper with automatic retry logic for browser crash resilience."""
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            return await _scrape_msport_once(max_matches=max_matches, days=days)
+        except Exception as e:
+            print(f"  [MSport] Attempt {attempt}/{max_retries} failed: {e}")
+            if attempt < max_retries:
+                print(f"  [MSport] Retrying in 5 seconds...")
+                await asyncio.sleep(5)
+            else:
+                print(f"  [MSport] All {max_retries} attempts failed")
+                traceback.print_exc()
+                return []
 
 if __name__ == "__main__":
     asyncio.run(main())
