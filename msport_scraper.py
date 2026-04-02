@@ -506,7 +506,6 @@ async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
                 "--disable-software-rasterizer",
-                "--single-process",
             ],
         )
         context = await browser.new_context(
@@ -549,11 +548,14 @@ async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
             )
             results.extend(day_results)
 
-        await context.close()
-
-
-        await browser.close()
-
+        try:
+            await context.close()
+        except Exception:
+            pass
+        try:
+            await browser.close()
+        except Exception:
+            pass
     print(f"  [MSport] Done - {len(results)} matches total")
     return results
 
