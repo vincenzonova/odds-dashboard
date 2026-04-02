@@ -376,6 +376,8 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-software-rasterizer",
             ],
         )
         context = await browser.new_context(
@@ -407,12 +409,14 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
                 print(f"  [SportyBet] {league_name} error: {e}")
                 continue
 
-        await context.close()
-
-
-
-        await browser.close()
-
+        try:
+            await context.close()
+        except Exception:
+            pass
+        try:
+            await browser.close()
+        except Exception:
+            pass
     print(f"  [SportyBet] Done - {len(results)} matches total")
     return results
 
