@@ -504,6 +504,9 @@ async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--single-process",
             ],
         )
         context = await browser.new_context(
