@@ -45,9 +45,9 @@ from betslip_checker import (
 # Configuration
 SECRET_KEY = "your-secret-key-change-in-production"
 MAX_MATCHES = 160
-SCRAPE_DAYS = 7  # Default: scrape next 7 days. Configurable via settings (1-10)
-MSPORT_MIN_DAYS = 7   # MSport needs wider window for coverage (SportyBet/YaJuego don't filter by date)
-BET9JA_MIN_DAYS = 7   # Bet9ja API is fast, wider window improves merge coverage
+SCRAPE_DAYS = 10  # Default: scrape next 10 days. Wider window ensures full PL matchday coverage
+MSPORT_MIN_DAYS = 10   # MSport needs wider window for coverage (SportyBet/YaJuego don't filter by date)
+BET9JA_MIN_DAYS = 10   # Bet9ja API is fast, wider window improves merge coverage
 REFRESH_INTERVAL_MINUTES = 5
 DB_PATH = "odds_history.db"
 SCRAPER_TIMEOUTS = {
@@ -1432,7 +1432,8 @@ document.getElementById('pass').addEventListener('keypress',e=>{if(e.key==='Ente
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """Redirect root to login page."""
-    return HTMLResponse('<meta http-equiv="refresh" content="0;url=/login">')
+    return HTMLResponse('<meta http-equiSCRAPE_DAYS
+    v="refresh" content="0;url=/login">')
 
 
 @app.get("/login", response_class=HTMLResponse)
