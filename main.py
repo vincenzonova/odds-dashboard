@@ -23,7 +23,7 @@ from sportybet_scraper import scrape_sportybet
 # from betking_scraper import scrape_betking  # PAUSED - geo-blocked
 from msport_scraper import scrape_msport
 from yajuego_scraper import scrape_yajuego
-# from betfair_scraper import scrape_betfair  # PAUSED — reducing resource pressure on staging
+# from betfair_scraper import scrape_betfair  # PAUSED â reducing resource pressure on staging
 # from betgr8_scraper import scrape_betgr8  # PAUSED
 # from betano_scraper import scrape_betano  # PAUSED - timeout issues
 
@@ -45,9 +45,9 @@ from betslip_checker import (
 # Configuration
 SECRET_KEY = "your-secret-key-change-in-production"
 MAX_MATCHES = 160
-SCRAPE_DAYS = 7  # Default: scrape next 7 days. Configurable via settings (1-10)
-MSPORT_MIN_DAYS = 7   # MSport needs wider window for coverage (SportyBet/YaJuego don't filter by date)
-BET9JA_MIN_DAYS = 7   # Bet9ja API is fast, wider window improves merge coverage
+SCRAPE_DAYS = 10  # Default: scrape next 10 days. Wider window ensures full PL matchday coverage
+MSPORT_MIN_DAYS = 10   # MSport needs wider window for coverage (SportyBet/YaJuego don't filter by date)
+BET9JA_MIN_DAYS = 10   # Bet9ja API is fast, wider window improves merge coverage
 REFRESH_INTERVAL_MINUTES = 5
 DB_PATH = "odds_history.db"
 SCRAPER_TIMEOUTS = {
@@ -60,7 +60,7 @@ SCRAPER_TIMEOUTS = {
     "Betfair": 60,      # API-based, direct Betfair Exchange
 }
 
-# ── Betslip Service (separate Railway instance) ───────────────────────
+# ââ Betslip Service (separate Railway instance) âââââââââââââââââââââââ
 BETSLIP_SERVICE_URL = os.getenv("BETSLIP_SERVICE_URL", "")
 BETSLIP_API_SECRET = os.getenv("BETSLIP_API_SECRET", "betslip-secret-key")
 DEFAULT_SCRAPER_TIMEOUT = 120
@@ -550,7 +550,7 @@ async def api_live_comparison(
     current_user: str = Depends(get_current_user),
 ):
     """
-    Live betslip comparison — proxies to the separate betslip service.
+    Live betslip comparison â proxies to the separate betslip service.
     The betslip service runs Playwright on its own Railway instance to
     avoid resource contention with the main odds scraper.
 
@@ -749,7 +749,7 @@ from sportybet_scraper import scrape_sportybet
 # from betking_scraper import scrape_betking  # PAUSED - geo-blocked
 from msport_scraper import scrape_msport
 from yajuego_scraper import scrape_yajuego
-# from betfair_scraper import scrape_betfair  # PAUSED — reducing resource pressure on staging
+# from betfair_scraper import scrape_betfair  # PAUSED â reducing resource pressure on staging
 # from betgr8_scraper import scrape_betgr8  # PAUSED
 # from betano_scraper import scrape_betano  # PAUSED - timeout issues
 
@@ -786,7 +786,7 @@ SCRAPER_TIMEOUTS = {
     "Betfair": 60,      # API-based, direct Betfair Exchange
 }
 
-# ── Betslip Service (separate Railway instance) ───────────────────────
+# ââ Betslip Service (separate Railway instance) âââââââââââââââââââââââ
 BETSLIP_SERVICE_URL = os.getenv("BETSLIP_SERVICE_URL", "")
 BETSLIP_API_SECRET = os.getenv("BETSLIP_API_SECRET", "betslip-secret-key")
 DEFAULT_SCRAPER_TIMEOUT = 120
@@ -1276,7 +1276,7 @@ async def api_live_comparison(
     current_user: str = Depends(get_current_user),
 ):
     """
-    Live betslip comparison — proxies to the separate betslip service.
+    Live betslip comparison â proxies to the separate betslip service.
     The betslip service runs Playwright on its own Railway instance to
     avoid resource contention with the main odds scraper.
 
