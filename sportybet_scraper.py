@@ -381,43 +381,44 @@ async def _scrape_sportybet_once(max_matches: int = 50, days: int = 2) -> list[d
                 "--disable-software-rasterizer",
             ],
         )
-        context = await browser.new_context(
-            ignore_https_errors=True,
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        )
-        page = await context.new_page()
-        # Anti-bot stealth: hide webdriver flag
-        await page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-            window.chrome = {runtime: {}};
-        """)
-        await page.route(
-            "**/*.{png,jpg,jpeg,gif,webp,woff,woff2,svg}",
-            lambda r: r.abort(),
-        )
+        try:
+            context = await browser.new_context(
+                ignore_https_errors=True,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            )
+            page = await context.new_page()
+            # Anti-bot stealth: hide webdriver flag
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                window.chrome = {runtime: {}};
+            """)
+            await page.route(
+                "**/*.{png,jpg,jpeg,gif,webp,woff,woff2,svg}",
+                lambda r: r.abort(),
+            )
 
-        for league_name, url in TOURNAMENT_URLS.items():
-            if len(results) >= max_matches:
-                break
+            for league_name, url in TOURNAMENT_URLS.items():
+                if len(results) >= max_matches:
+                    break
+                try:
+                    league_matches = await _scrape_league(
+                        page, league_name, url, seen, max_matches, len(results)
+                    )
+                    results.extend(league_matches)
+                except Exception as e:
+                    print(f"  [SportyBet] {league_name} error: {e}")
+                    continue
+        finally:
             try:
-                league_matches = await _scrape_league(
-                    page, league_name, url, seen, max_matches, len(results)
-                )
-                results.extend(league_matches)
-            except Exception as e:
-                print(f"  [SportyBet] {league_name} error: {e}")
-                continue
-
-        try:
-            await context.close()
-        except Exception:
-            pass
-        try:
-            await browser.close()
-        except Exception:
-            pass
+                await context.close()
+            except Exception:
+                pass
+            try:
+                await browser.close()
+            except Exception:
+                pass
     print(f"  [SportyBet] Done - {len(results)} matches total")
     return results
 
