@@ -509,54 +509,55 @@ async def _scrape_msport_once(max_matches: int = 200, days: int = 2) -> list:
                 "--disable-software-rasterizer",
             ],
         )
-        context = await browser.new_context(
-            ignore_https_errors=True,
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        )
-        page = await context.new_page()
-        # Anti-bot stealth: hide webdriver flag
-        await page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-            window.chrome = {runtime: {}};
-        """)
-
-        # Block images/fonts for speed
-        await page.route(
-            "**/*.{png,jpg,jpeg,gif,webp,woff,woff2,svg}",
-            lambda r: r.abort(),
-        )
-
-        # Pre-warm: load MSport homepage to set cookies/session
         try:
-            await page.goto(MSPORT_BASE, wait_until="domcontentloaded", timeout=20000)
-            await page.wait_for_timeout(2000)
-        except Exception:
-            pass
-
-        # Scrape for the configured number of days
-        today = datetime.now()
-        for day_offset in range(days):  # Uses days parameter from settings
-            if len(results) >= max_matches:
-                break
-            target_date = today + timedelta(days=day_offset)
-            date_str = target_date.strftime("%Y-%m-%d")
-            is_today = (day_offset == 0)
-
-            day_results = await _scrape_date(
-                page, date_str, is_today, seen, max_matches - len(results)
+            context = await browser.new_context(
+                ignore_https_errors=True,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             )
-            results.extend(day_results)
+            page = await context.new_page()
+            # Anti-bot stealth: hide webdriver flag
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                window.chrome = {runtime: {}};
+            """)
 
-        try:
-            await context.close()
-        except Exception:
-            pass
-        try:
-            await browser.close()
-        except Exception:
-            pass
+            # Block images/fonts for speed
+            await page.route(
+                "**/*.{png,jpg,jpeg,gif,webp,woff,woff2,svg}",
+                lambda r: r.abort(),
+            )
+
+            # Pre-warm: load MSport homepage to set cookies/session
+            try:
+                await page.goto(MSPORT_BASE, wait_until="domcontentloaded", timeout=20000)
+                await page.wait_for_timeout(2000)
+            except Exception:
+                pass
+
+            # Scrape for the configured number of days
+            today = datetime.now()
+            for day_offset in range(days):  # Uses days parameter from settings
+                if len(results) >= max_matches:
+                    break
+                target_date = today + timedelta(days=day_offset)
+                date_str = target_date.strftime("%Y-%m-%d")
+                is_today = (day_offset == 0)
+
+                day_results = await _scrape_date(
+                    page, date_str, is_today, seen, max_matches - len(results)
+                )
+                results.extend(day_results)
+
+        finally:
+                await context.close()
+            except Exception:
+                pass
+            try:
+                await browser.close()
+            except Exception:
+                pass
     print(f"  [MSport] Done - {len(results)} matches total")
     return results
 
