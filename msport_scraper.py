@@ -551,6 +551,7 @@ async def _scrape_msport_once(max_matches: int = 200, days: int = 2) -> list:
                 results.extend(day_results)
 
         finally:
+            try:
                 await context.close()
             except Exception:
                 pass
