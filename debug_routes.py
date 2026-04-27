@@ -11,6 +11,8 @@ from datetime import datetime
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -109,7 +111,6 @@ async def debug_chromium_check():
     try:
         from playwright.async_api import async_playwright
 
-logger = logging.getLogger(__name__)
 
         pw = None
         browser = None
