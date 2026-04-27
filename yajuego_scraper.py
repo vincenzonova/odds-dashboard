@@ -14,6 +14,9 @@ import aiohttp
 import time
 from difflib import SequenceMatcher
 
+logger = logging.getLogger(__name__)
+
+
 
 YAJUEGO_API = "https://sports.yajuego.co/desktop/feapi/PalimpsestAjax"
 
@@ -285,8 +288,5 @@ async def scrape_yajuego(max_matches: int = 50, days: int = 7) -> list[dict]:
 
 if __name__ == "__main__":
     import json
-
-logger = logging.getLogger(__name__)
-
     data = asyncio.run(scrape_yajuego(max_matches=10))
     logger.info(json.dumps(data, indent=2))

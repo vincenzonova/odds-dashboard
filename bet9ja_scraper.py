@@ -7,6 +7,9 @@ import asyncio
 import aiohttp
 from datetime import datetime, timedelta
 
+logger = logging.getLogger(__name__)
+
+
 BET9JA_API = "https://sports.bet9ja.com/desktop/feapi/PalimpsestAjax/GetEventsInGroupV2"
 
 # League name → Bet9ja GROUPID
@@ -165,8 +168,5 @@ async def scrape_bet9ja(max_matches: int = 50, days: int = 2) -> list[dict]:
 
 if __name__ == "__main__":
     import json
-
-logger = logging.getLogger(__name__)
-
     data = asyncio.run(scrape_bet9ja(max_matches=10))
     logger.info(json.dumps(data, indent=2))

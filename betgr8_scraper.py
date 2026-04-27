@@ -13,6 +13,9 @@ import re
 from playwright.async_api import async_playwright
 from typing import Any, Dict, List, Optional
 
+logger = logging.getLogger(__name__)
+
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -487,8 +490,6 @@ from playwright.async_api import async_playwright
 from typing import Any, Dict, List, Optional
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-logger = logging.getLogger(__name__)
-
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
 LEAGUE_URLS = {
     "Premier League": "https://betgr8.com/ng/competition/premier-league/1/1",

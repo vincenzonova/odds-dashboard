@@ -64,6 +64,9 @@ GATHER_TIMEOUT_SECONDS = settings.gather_timeout_seconds
 
 # --- Merge logic (extracted to merge.py) ---
 from merge import (
+
+logger = logging.getLogger(__name__)
+
     TEAM_ALIASES,
     SIGN_SWAP_MAP,
     _normalize_team,
@@ -763,9 +766,6 @@ async def scraper_diagnostics():
 
 if __name__ == "__main__":
     import uvicorn
-
-logger = logging.getLogger(__name__)
-
 
 def kill_stale_chromium():
     """Kill any lingering Chromium/headless_shell processes to prevent thread exhaustion."""
