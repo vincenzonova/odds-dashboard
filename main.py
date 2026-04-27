@@ -64,9 +64,6 @@ GATHER_TIMEOUT_SECONDS = settings.gather_timeout_seconds
 
 # --- Merge logic (extracted to merge.py) ---
 from merge import (
-
-logger = logging.getLogger(__name__)
-
     TEAM_ALIASES,
     SIGN_SWAP_MAP,
     _normalize_team,
@@ -74,6 +71,9 @@ logger = logging.getLogger(__name__)
     fuzzy_match_event,
     merge_odds,
 )
+
+logger = logging.getLogger(__name__)
+
 
 BOOKMAKERS = ["bet9ja", "sportybet", "msport", "yajuego"]
 
