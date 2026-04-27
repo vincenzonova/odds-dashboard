@@ -224,10 +224,24 @@ async def do_refresh():
         # Run Bet9ja (API) in parallel with Playwright scrapers run sequentially
         # to avoid memory pressure from 3+ concurrent headless browsers
         async def _run_playwright_scrapers():
-            """Run Playwright scrapers sequentially (one browser at a time)."""
+            """Run Playwright scrapers in isolated subprocesses to prevent thread leaks."""
             kill_stale_chromium()
-            r1 = await safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES, days=SCRAPE_DAYS)
-            r2 = await safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, MSPORT_MIN_DAYS))
+            loop = asyncio.get_event_loop()
+            r1 = await loop.run_in_executor(
+                None,
+                run_scraper_subprocess,
+                "sportybet_scraper", "scrape_sportybet",
+                MAX_MATCHES, SCRAPE_DAYS,
+                SCRAPER_TIMEOUTS.get("SportyBet", DEFAULT_SCRAPER_TIMEOUT),
+            )
+            kill_stale_chromium()
+            r2 = await loop.run_in_executor(
+                None,
+                run_scraper_subprocess,
+                "msport_scraper", "scrape_msport",
+                MAX_MATCHES, max(SCRAPE_DAYS, MSPORT_MIN_DAYS),
+                SCRAPER_TIMEOUTS.get("MSport", DEFAULT_SCRAPER_TIMEOUT),
+            )
             return [r1, r2]
 
         # API scrapers (Bet9ja, YaJuego) run in parallel with sequential Playwright scrapers
@@ -775,6 +789,61 @@ def kill_stale_chromium():
         logger.info("Cleaned up stale Chromium processes")
     except Exception as e:
         logger.warning(f"Chromium cleanup failed: {e}")
+
+def run_scraper_subprocess(scraper_module: str, func_name: str, max_matches: int, days: int = None, timeout: int = 300):
+    """Run a Playwright scraper in an isolated subprocess with hard timeout.
+    
+    This ensures Chromium processes are fully cleaned up even if the scraper hangs,
+    since killing the subprocess also kills all its child processes.
+    """
+    import json as _json
+    script = f"""
+import json, sys
+from {scraper_module} import {func_name}
+import asyncio
+
+async def main():
+    try:
+        kwargs = {{"max_matches": {max_matches}}}
+        if {days!r} is not None:
+            kwargs["days"] = {days!r}
+        result = await {func_name}(**kwargs)
+        print(json.dumps(result))
+    except Exception as e:
+        print(json.dumps({{"error": str(e)}}))
+
+asyncio.run(main())
+"""
+    try:
+        proc = subprocess.run(
+            ["python3", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env={**os.environ},
+        )
+        if proc.returncode != 0:
+            logger.error(f"Subprocess for {scraper_module}.{func_name} failed: {proc.stderr[:500]}")
+            return []
+        # Parse the JSON output (last non-empty line)
+        output_lines = [l for l in proc.stdout.strip().split("\n") if l.strip()]
+        if not output_lines:
+            logger.error(f"No output from {scraper_module}.{func_name}")
+            return []
+        data = _json.loads(output_lines[-1])
+        if isinstance(data, dict) and "error" in data:
+            logger.error(f"{scraper_module}.{func_name} error: {data['error']}")
+            return []
+        logger.info(f"{scraper_module}.{func_name} returned {len(data)} matches")
+        return data
+    except subprocess.TimeoutExpired:
+        logger.error(f"{scraper_module}.{func_name} timed out after {timeout}s — subprocess killed")
+        return []
+    except Exception as e:
+        logger.error(f"{scraper_module}.{func_name} subprocess error: {e}")
+        return []
+
+
 
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
