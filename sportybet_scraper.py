@@ -441,8 +441,7 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
                 traceback.print_exc()
                 return []
 
-if __name__ == "__main__":
-    import json
+
 def _kill_stale_chromium():
     """Kill lingering Chromium processes to prevent thread exhaustion."""
     try:
@@ -453,5 +452,7 @@ def _kill_stale_chromium():
         logger.warning(f"Chromium cleanup failed: {e}")
 
 
+if __name__ == "__main__":
+    import json
     data = asyncio.run(scrape_sportybet(max_matches=10))
     logger.info(json.dumps(data, indent=2))
