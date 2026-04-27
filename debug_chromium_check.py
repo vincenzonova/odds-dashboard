@@ -1,5 +1,8 @@
+import logging
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -45,7 +48,6 @@ async def chromium_check():
     try:
         from playwright.async_api import async_playwright
 
-logger = logging.getLogger(__name__)
 
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(
