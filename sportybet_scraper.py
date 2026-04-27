@@ -8,6 +8,8 @@ Extracts:
   - Double Chance (by clicking the "Double Chance" tab)
 """
 
+import logging
+import subprocess
 import asyncio
 import traceback
 from playwright.async_api import async_playwright
@@ -266,8 +268,7 @@ async def _scrape_league(page, league_name: str, url: str, seen: set,
                          max_matches: int, current_count: int) -> list[dict]:
     """Scrape a single league: main tab (1X2 + O/U 2.5 + O/U 1.5) then Double Chance tab."""
     results = []
-    print(f"  [SportyBet] Loading {league_name}...")
-
+    logger.info(f"  [SportyBet] Loading {league_name}...")
     await page.goto(url, wait_until="domcontentloaded", timeout=30000)
     await page.wait_for_selector(".match-row", timeout=15000)
     await page.wait_for_timeout(1000)
@@ -313,7 +314,7 @@ async def _scrape_league(page, league_name: str, url: str, seen: set,
 
     # -- Step 1b: Click dropdown to select 2.5 for rows with non-2.5 spread --
     if rows_needing_ou25:
-        print(f"  [SportyBet] {league_name}: fixing O/U 2.5 spread for {len(rows_needing_ou25)} matches...")
+        logger.info(f"  [SportyBet] {league_name}: fixing O/U 2.5 spread for {len(rows_needing_ou25)} matches...")
         ou_fixed = 0
         for match_idx, dom_row_idx in rows_needing_ou25:
             ou_odds = await _click_spread_for_value(page, dom_row_idx, "2.5")
@@ -321,11 +322,10 @@ async def _scrape_league(page, league_name: str, url: str, seen: set,
                 league_matches[match_idx]["odds"]["O/U 2.5"] = ou_odds
                 ou_fixed += 1
             await page.wait_for_timeout(300)
-        print(f"  [SportyBet] {league_name}: fixed O/U 2.5 for {ou_fixed}/{len(rows_needing_ou25)} matches")
-
+        logger.info(f"  [SportyBet] {league_name}: fixed O/U 2.5 for {ou_fixed}/{len(rows_needing_ou25)} matches")
     # -- Step 1c: Click dropdown to select 1.5 for ALL rows to get O/U 1.5 --
     if all_dom_indices:
-        print(f"  [SportyBet] {league_name}: scraping O/U 1.5 for {len(all_dom_indices)} matches...")
+        logger.info(f"  [SportyBet] {league_name}: scraping O/U 1.5 for {len(all_dom_indices)} matches...")
         ou15_count = 0
         for match_idx, dom_row_idx in all_dom_indices:
             ou_odds = await _click_spread_for_value(page, dom_row_idx, "1.5")
@@ -333,8 +333,7 @@ async def _scrape_league(page, league_name: str, url: str, seen: set,
                 league_matches[match_idx]["odds"]["O/U 1.5"] = ou_odds
                 ou15_count += 1
             await page.wait_for_timeout(300)
-        print(f"  [SportyBet] {league_name}: got O/U 1.5 for {ou15_count}/{len(all_dom_indices)} matches")
-
+        logger.info(f"  [SportyBet] {league_name}: got O/U 1.5 for {ou15_count}/{len(all_dom_indices)} matches")
     # -- Step 2: Click "Double Chance" tab and scrape --
     try:
         dc_tab = page.locator('.market-item', has_text='Double Chance')
@@ -358,12 +357,11 @@ async def _scrape_league(page, league_name: str, url: str, seen: set,
                     _add_dc_odds(match["odds"], dc_lookup[key])
                     dc_added += 1
 
-            print(f"  [SportyBet] {league_name}: +{len(league_matches)} matches, {dc_added} with DC odds")
+            logger.info(f"  [SportyBet] {league_name}: +{len(league_matches)} matches, {dc_added} with DC odds")
         else:
-            print(f"  [SportyBet] {league_name}: +{len(league_matches)} matches (no DC tab found)")
+            logger.info(f"  [SportyBet] {league_name}: +{len(league_matches)} matches (no DC tab found)")
     except Exception as e:
-        print(f"  [SportyBet] {league_name}: +{len(league_matches)} matches (DC scrape failed: {e})")
-
+        logger.error(f"  [SportyBet] {league_name}: +{len(league_matches)} matches (DC scrape failed: {e})")
     return league_matches
 
 
@@ -371,6 +369,7 @@ async def _scrape_sportybet_once(max_matches: int = 50, days: int = 2) -> list[d
     results = []
     seen = set()
 
+    _kill_stale_chromium()
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
@@ -408,7 +407,7 @@ async def _scrape_sportybet_once(max_matches: int = 50, days: int = 2) -> list[d
                     )
                     results.extend(league_matches)
                 except Exception as e:
-                    print(f"  [SportyBet] {league_name} error: {e}")
+                    logger.error(f"  [SportyBet] {league_name} error: {e}")
                     continue
         finally:
             try:
@@ -419,7 +418,7 @@ async def _scrape_sportybet_once(max_matches: int = 50, days: int = 2) -> list[d
                 await browser.close()
             except Exception:
                 pass
-    print(f"  [SportyBet] Done - {len(results)} matches total")
+    logger.info(f"  [SportyBet] Done - {len(results)} matches total")
     return results
 
 
@@ -430,16 +429,29 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
         try:
             return await _scrape_sportybet_once(max_matches=max_matches, days=days)
         except Exception as e:
-            print(f"  [SportyBet] Attempt {attempt}/{max_retries} failed: {e}")
+            logger.error(f"  [SportyBet] Attempt {attempt}/{max_retries} failed: {e}")
             if attempt < max_retries:
-                print(f"  [SportyBet] Retrying in 5 seconds...")
+                logger.warning(f"  [SportyBet] Retrying in 5 seconds...")
                 await asyncio.sleep(5)
             else:
-                print(f"  [SportyBet] All {max_retries} attempts failed")
+                logger.error(f"  [SportyBet] All {max_retries} attempts failed")
                 traceback.print_exc()
                 return []
 
 if __name__ == "__main__":
     import json
+
+logger = logging.getLogger(__name__)
+
+def _kill_stale_chromium():
+    """Kill lingering Chromium processes to prevent thread exhaustion."""
+    try:
+        subprocess.run(["pkill", "-f", "headless_shell"], capture_output=True, timeout=5)
+        subprocess.run(["pkill", "-f", "chromium"], capture_output=True, timeout=5)
+        logger.info("Cleaned up stale Chromium processes before launch")
+    except Exception as e:
+        logger.warning(f"Chromium cleanup failed: {e}")
+
+
     data = asyncio.run(scrape_sportybet(max_matches=10))
-    print(json.dumps(data, indent=2))
+    logger.info(json.dumps(data, indent=2))

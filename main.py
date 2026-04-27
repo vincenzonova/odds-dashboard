@@ -3,6 +3,8 @@ Odds Dashboard Backend - FastAPI with 5 Bookmakers
 Expanded to support: Bet9ja, SportyBet, BetKing, MSport, Betano
 """
 import asyncio
+import logging
+import subprocess
 import json
 import os
 import sqlite3
@@ -30,6 +32,8 @@ from yajuego_scraper import scrape_yajuego
 # Import dashboard HTML builder
 from dashboard import build_dashboard_html
 from debug_routes import router as debug_router
+from settings import settings
+from middleware import RequestIDMiddleware, LoggingMiddleware
 
 # Import betslip checker with all return calculators
 from betslip_checker import (
@@ -43,28 +47,20 @@ from betslip_checker import (
 )
 
 # Configuration
-SECRET_KEY = "your-secret-key-change-in-production"
-MAX_MATCHES = 160
-SCRAPE_DAYS = 10  # Default: scrape next 10 days. Wider window ensures full PL matchday coverage
-MSPORT_MIN_DAYS = 10   # MSport needs wider window for coverage (SportyBet/YaJuego don't filter by date)
-BET9JA_MIN_DAYS = 10   # Bet9ja API is fast, wider window improves merge coverage
-REFRESH_INTERVAL_MINUTES = 5
-DB_PATH = "odds_history.db"
-SCRAPER_TIMEOUTS = {
-    "Bet9ja": 60,       # API-based, fast
-    # "BetKing": 60,      # PAUSED
-    # "Betano": 60,       # PAUSED
-    "SportyBet": 420,   # Playwright, needs 3-5 min for all leagues
-    "MSport": 600,      # Playwright, 10 days needs 6-8 min
-    "YaJuego": 60,      # API-based, fast
-    "Betfair": 60,      # API-based, direct Betfair Exchange
-}
+SECRET_KEY = settings.secret_key
+MAX_MATCHES = settings.max_matches
+SCRAPE_DAYS = settings.scrape_days
+MSPORT_MIN_DAYS = settings.msport_min_days
+BET9JA_MIN_DAYS = settings.bet9ja_min_days
+REFRESH_INTERVAL_MINUTES = settings.refresh_interval_minutes
+DB_PATH = settings.db_path
+SCRAPER_TIMEOUTS = settings.scraper_timeouts
 
 # ââ Betslip Service (separate Railway instance) âââââââââââââââââââââââ
-BETSLIP_SERVICE_URL = os.getenv("BETSLIP_SERVICE_URL", "")
-BETSLIP_API_SECRET = os.getenv("BETSLIP_API_SECRET", "betslip-secret-key")
-DEFAULT_SCRAPER_TIMEOUT = 120
-GATHER_TIMEOUT_SECONDS = 600
+BETSLIP_SERVICE_URL = settings.betslip_service_url
+BETSLIP_API_SECRET = settings.betslip_api_secret
+DEFAULT_SCRAPER_TIMEOUT = settings.default_scraper_timeout
+GATHER_TIMEOUT_SECONDS = settings.gather_timeout_seconds
 
 # --- Merge logic (extracted to merge.py) ---
 from merge import (
@@ -174,9 +170,7 @@ def save_odds_to_db(rows: list):
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"Error saving to DB: {e}")
-
-
+        logger.error(f"Error saving to DB: {e}")
 async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_MATCHES, days: int = None):
     """Safely scrape a bookmaker with error handling and per-scraper timeout."""
     import time as _time
@@ -188,7 +182,7 @@ async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_M
             timeout=timeout
         )
         elapsed = round(_time.time() - start_ts, 1)
-        print(f"  [Scraper] {bookmaker_name} completed: {len(result)} events in {elapsed}s (timeout was {timeout}s)")
+        logger.warning(f"  [Scraper] {bookmaker_name} completed: {len(result)} events in {elapsed}s (timeout was {timeout}s)")
         diag = {"count": len(result), "elapsed_s": elapsed, "error": None, "timeout_s": timeout, "timestamp": datetime.now().isoformat()}
         cache.setdefault("scraper_diagnostics", {})[bookmaker_name] = diag
         return {
@@ -198,7 +192,7 @@ async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_M
         }
     except asyncio.TimeoutError:
         elapsed = round(_time.time() - start_ts, 1)
-        print(f"  [Scraper] {bookmaker_name} TIMED OUT after {timeout}s (elapsed: {elapsed}s)")
+        logger.warning(f"  [Scraper] {bookmaker_name} TIMED OUT after {timeout}s (elapsed: {elapsed}s)")
         diag = {"count": 0, "elapsed_s": elapsed, "error": f"timeout after {timeout}s", "timeout_s": timeout, "timestamp": datetime.now().isoformat()}
         cache.setdefault("scraper_diagnostics", {})[bookmaker_name] = diag
         return {
@@ -208,7 +202,7 @@ async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_M
         }
     except Exception as e:
         elapsed = round(_time.time() - start_ts, 1)
-        print(f"  [Scraper] {bookmaker_name} ERROR after {elapsed}s: {e}")
+        logger.error(f"  [Scraper] {bookmaker_name} ERROR after {elapsed}s: {e}")
         diag = {"count": 0, "elapsed_s": elapsed, "error": str(e), "timeout_s": timeout, "timestamp": datetime.now().isoformat()}
         cache.setdefault("scraper_diagnostics", {})[bookmaker_name] = diag
         return {
@@ -228,6 +222,7 @@ async def do_refresh():
         # to avoid memory pressure from 3+ concurrent headless browsers
         async def _run_playwright_scrapers():
             """Run Playwright scrapers sequentially (one browser at a time)."""
+            kill_stale_chromium()
             r1 = await safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES, days=SCRAPE_DAYS)
             r2 = await safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, MSPORT_MIN_DAYS))
             return [r1, r2]
@@ -334,6 +329,11 @@ async def lifespan(app: FastAPI):
     """FastAPI lifespan context manager for startup/shutdown."""
     global scheduler
     # Startup
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     init_db()
     scheduler = AsyncIOScheduler()
     scheduler.add_job(do_refresh, "interval", minutes=REFRESH_INTERVAL_MINUTES)
@@ -352,6 +352,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(LoggingMiddleware)
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -614,11 +616,11 @@ async def api_live_comparison(
                     betslip_data["stake"] = stake
                     return JSONResponse(betslip_data)
                 else:
-                    print(f"[live-comparison] Betslip service returned {resp.status_code}: {resp.text}")
+                    logger.info(f"[live-comparison] Betslip service returned {resp.status_code}: {resp.text}")
                     # Fall through to formula fallback
 
         # Fallback: formula-based calculation (same as custom-comparison)
-        print("[live-comparison] Betslip service not available, using formula fallback")
+        logger.info("[live-comparison] Betslip service not available, using formula fallback")
         all_calcs = {
             "bet9ja": lambda: calculate_bet9ja_returns(selections, stake),
             "sportybet": lambda: _sportybet_formula_fallback(selections, stake),
@@ -638,7 +640,7 @@ async def api_live_comparison(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[live-comparison] Live comparison failed: {e}")
+        logger.error(f"[live-comparison] Live comparison failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/accumulators")
@@ -761,4 +763,18 @@ async def scraper_diagnostics():
 
 if __name__ == "__main__":
     import uvicorn
+
+logger = logging.getLogger(__name__)
+
+
+def kill_stale_chromium():
+    """Kill any lingering Chromium/headless_shell processes to prevent thread exhaustion."""
+    try:
+        subprocess.run(["pkill", "-f", "headless_shell"], capture_output=True, timeout=5)
+        subprocess.run(["pkill", "-f", "chromium"], capture_output=True, timeout=5)
+        logger.info("Cleaned up stale Chromium processes")
+    except Exception as e:
+        logger.warning(f"Chromium cleanup failed: {e}")
+
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
