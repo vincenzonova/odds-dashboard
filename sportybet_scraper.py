@@ -9,6 +9,7 @@ Extracts:
 """
 
 import logging
+import subprocess
 import asyncio
 import traceback
 from playwright.async_api import async_playwright
@@ -368,6 +369,7 @@ async def _scrape_sportybet_once(max_matches: int = 50, days: int = 2) -> list[d
     results = []
     seen = set()
 
+    _kill_stale_chromium()
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
@@ -440,6 +442,16 @@ if __name__ == "__main__":
     import json
 
 logger = logging.getLogger(__name__)
+
+def _kill_stale_chromium():
+    """Kill lingering Chromium processes to prevent thread exhaustion."""
+    try:
+        subprocess.run(["pkill", "-f", "headless_shell"], capture_output=True, timeout=5)
+        subprocess.run(["pkill", "-f", "chromium"], capture_output=True, timeout=5)
+        logger.info("Cleaned up stale Chromium processes before launch")
+    except Exception as e:
+        logger.warning(f"Chromium cleanup failed: {e}")
+
 
     data = asyncio.run(scrape_sportybet(max_matches=10))
     logger.info(json.dumps(data, indent=2))

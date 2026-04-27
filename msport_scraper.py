@@ -25,6 +25,7 @@ DOM structure:
 """
 
 import logging
+import subprocess
 import asyncio
 import traceback
 from datetime import datetime, timedelta
@@ -493,6 +494,7 @@ async def _scrape_msport_once(max_matches: int = 200, days: int = 2) -> list:
     results = []
     seen = set()
 
+    _kill_stale_chromium()
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
@@ -562,6 +564,16 @@ async def main():
     import json
 
 logger = logging.getLogger(__name__)
+
+def _kill_stale_chromium():
+    """Kill lingering Chromium processes to prevent thread exhaustion."""
+    try:
+        subprocess.run(["pkill", "-f", "headless_shell"], capture_output=True, timeout=5)
+        subprocess.run(["pkill", "-f", "chromium"], capture_output=True, timeout=5)
+        logger.info("Cleaned up stale Chromium processes before launch")
+    except Exception as e:
+        logger.warning(f"Chromium cleanup failed: {e}")
+
 
     matches = await scrape_msport(max_matches=200)
     logger.info(json.dumps(matches, indent=2))

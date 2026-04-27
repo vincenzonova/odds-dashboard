@@ -4,6 +4,7 @@ Expanded to support: Bet9ja, SportyBet, BetKing, MSport, Betano
 """
 import asyncio
 import logging
+import subprocess
 import json
 import os
 import sqlite3
@@ -221,6 +222,7 @@ async def do_refresh():
         # to avoid memory pressure from 3+ concurrent headless browsers
         async def _run_playwright_scrapers():
             """Run Playwright scrapers sequentially (one browser at a time)."""
+            kill_stale_chromium()
             r1 = await safe_scrape("SportyBet", scrape_sportybet, max_matches=MAX_MATCHES, days=SCRAPE_DAYS)
             r2 = await safe_scrape("MSport", scrape_msport, max_matches=MAX_MATCHES, days=max(SCRAPE_DAYS, MSPORT_MIN_DAYS))
             return [r1, r2]
@@ -763,5 +765,16 @@ if __name__ == "__main__":
     import uvicorn
 
 logger = logging.getLogger(__name__)
+
+
+def kill_stale_chromium():
+    """Kill any lingering Chromium/headless_shell processes to prevent thread exhaustion."""
+    try:
+        subprocess.run(["pkill", "-f", "headless_shell"], capture_output=True, timeout=5)
+        subprocess.run(["pkill", "-f", "chromium"], capture_output=True, timeout=5)
+        logger.info("Cleaned up stale Chromium processes")
+    except Exception as e:
+        logger.warning(f"Chromium cleanup failed: {e}")
+
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
