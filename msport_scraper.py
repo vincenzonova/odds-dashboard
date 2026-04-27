@@ -31,6 +31,8 @@ import traceback
 from datetime import datetime, timedelta
 from playwright.async_api import async_playwright
 
+logger = logging.getLogger(__name__)
+
 MSPORT_BASE = "https://www.msport.com/ng/web/sports/list/Soccer"
 
 # Sportradar tournament IDs used by MSport for URL filtering
@@ -558,13 +560,6 @@ async def _scrape_msport_once(max_matches: int = 200, days: int = 2) -> list:
     logger.info(f"  [MSport] Done - {len(results)} matches total")
     return results
 
-
-async def main():
-    """Main execution function."""
-    import json
-
-logger = logging.getLogger(__name__)
-
 def _kill_stale_chromium():
     """Kill lingering Chromium processes to prevent thread exhaustion."""
     try:
@@ -574,9 +569,6 @@ def _kill_stale_chromium():
     except Exception as e:
         logger.warning(f"Chromium cleanup failed: {e}")
 
-
-    matches = await scrape_msport(max_matches=200)
-    logger.info(json.dumps(matches, indent=2))
 async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
     """Wrapper with automatic retry logic for browser crash resilience."""
     max_retries = 3
@@ -593,5 +585,11 @@ async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
                 traceback.print_exc()
                 return []
 
+
 if __name__ == "__main__":
+    async def main():
+        """Main execution function."""
+        import json
+        matches = await scrape_msport(max_matches=200)
+        logger.info(json.dumps(matches, indent=2))
     asyncio.run(main())
