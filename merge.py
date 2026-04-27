@@ -14,6 +14,7 @@ Public API:
 """
 
 from difflib import SequenceMatcher
+import logging
 import logging, re
 
 logger = logging.getLogger(__name__)
@@ -556,8 +557,7 @@ def merge_odds(raw_data: dict) -> list:
                 }
                 matched_league = league  # New entry in current league
             else:
-                print(f"  [Merge] Matched '{event_name}' ({bk_name}) -> '{league_index[matched_league][matched_key]['event']}' league={matched_league} (reversed={is_reversed})")
-
+                logger.info(f"  [Merge] Matched '{event_name}' ({bk_name}) -> '{league_index[matched_league][matched_key]['event']}' league={matched_league} (reversed={is_reversed})")
             # Update start_time if this bookmaker has it and existing entry doesn't
             if ev.get("start_time") and not league_index[matched_league][matched_key].get("start_time"):
                 league_index[matched_league][matched_key]["start_time"] = ev["start_time"]

@@ -3,9 +3,13 @@ Betslip Checker & Return Calculator for 5 Bookmakers
 Supports: Bet9ja, SportyBet, BetKing, MSport, Betano
 """
 
+import logging
 import re
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
+
 
 
 # ============================================================================

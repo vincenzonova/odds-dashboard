@@ -1,4 +1,5 @@
 """Debug connectivity routes for Railway diagnostics."""
+import logging
 import socket
 import time
 import aiohttp
@@ -107,6 +108,9 @@ async def debug_chromium_check():
     launch_result = {}
     try:
         from playwright.async_api import async_playwright
+
+logger = logging.getLogger(__name__)
+
         pw = None
         browser = None
         try:

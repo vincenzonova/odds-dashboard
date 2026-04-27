@@ -378,52 +378,45 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    print("=" * 60)
-    print("Betano Scraper - Test Run")
-    print("=" * 60)
-    print(f"Timestamp: {datetime.now().isoformat()}")
-    print(f"Target: betano.ng (Nigerian version)")
-    print()
-
+    logger.info("=" * 60)
+    logger.info("Betano Scraper - Test Run")
+    logger.info("=" * 60)
+    logger.info(f"Timestamp: {datetime.now().isoformat()}")
+    logger.info(f"Target: betano.ng (Nigerian version)")
+    # (blank line removed)
     # Test the accumulator bonus function
-    print("Betano Accumulator Bonus Rates:")
-    print("-" * 40)
+    logger.info("Betano Accumulator Bonus Rates:")
+    logger.info("-" * 40)
     for selections in range(2, 9):
         bonus = calculate_betano_bonus(selections)
-        print(f"{selections} selections: {bonus * 100:.1f}%")
-    print()
-
+        logger.info(f"{selections} selections: {bonus * 100:.1f}%")
+    # (blank line removed)
     # Run the scraper
-    print("Starting scraper...")
-    print("-" * 40)
-
+    logger.info("Starting scraper...")
+    logger.info("-" * 40)
     try:
         matches = await scrape_betano(max_matches=10)
 
-        print(f"\nFound {len(matches)} matches")
-        print()
-
+        logger.info(f"\nFound {len(matches)} matches")
+        # (blank line removed)
         if matches:
             # Display first match as example
             first_match = matches[0]
-            print("Sample Match:")
-            print(json.dumps(first_match, indent=2))
+            logger.info("Sample Match:")
+            logger.info(json.dumps(first_match, indent=2))
         else:
-            print("No matches found. This may indicate:")
-            print("1. Betano API endpoints haven't been discovered yet")
-            print("2. Website structure differs from expected selectors")
-            print("3. Geographic restrictions (server is in EU, betano.ng may be restricted)")
-            print("\nNEXT STEPS:")
-            print("1. Open betano.ng in a browser")
-            print("2. Open DevTools â Network tab")
-            print("3. Look for API calls (XHR/Fetch) when loading football odds")
-            print("4. Document the endpoint URLs and response structure")
-            print("5. Update BETANO_API_ENDPOINTS and _parse_api_response() accordingly")
-
+            logger.info("No matches found. This may indicate:")
+            logger.info("1. Betano API endpoints haven't been discovered yet")
+            logger.info("2. Website structure differs from expected selectors")
+            logger.info("3. Geographic restrictions (server is in EU, betano.ng may be restricted)")
+            logger.info("\nNEXT STEPS:")
+            logger.info("1. Open betano.ng in a browser")
+            logger.info("2. Open DevTools â Network tab")
+            logger.info("3. Look for API calls (XHR/Fetch) when loading football odds")
+            logger.info("4. Document the endpoint URLs and response structure")
+            logger.info("5. Update BETANO_API_ENDPOINTS and _parse_api_response() accordingly")
     except Exception as e:
         logger.error(f"Scraper execution failed: {e}", exc_info=True)
-        print(f"Error: {e}")
-
-
+        logger.error(f"Error: {e}")
 if __name__ == "__main__":
     asyncio.run(main())

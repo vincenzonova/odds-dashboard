@@ -470,7 +470,7 @@ def format_output(matches: List[dict]) -> str:
 
 if __name__ == "__main__":
     matches = asyncio.run(scrape_betgr8(max_matches=50))
-    print(format_output(matches))
+    logger.info(format_output(matches))
 """
 Betgr8 Scraper — DOM-based extraction using Playwright.
 Navigates to league competition pages, clicks through market tabs (1X2, Double Chance, Total),
@@ -926,4 +926,4 @@ def format_output(matches: List[dict]) -> str:
 
 if __name__ == "__main__":
     matches = asyncio.run(scrape_betgr8(max_matches=50))
-    print(format_output(matches))
+    logger.info(format_output(matches))

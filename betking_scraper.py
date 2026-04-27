@@ -399,16 +399,15 @@ __all__ = [
 if __name__ == "__main__":
     # Test the scraper
     async def main():
-        print("Testing BetKing scraper...")
-        print(f"Bonus for 10 selections: {calculate_betking_bonus(10) * 100:.1f}%")
-        print(f"Bonus for 20 selections: {calculate_betking_bonus(20) * 100:.1f}%")
-        print(f"Bonus for 40 selections: {calculate_betking_bonus(40) * 100:.1f}%")
-        print("\nAttempting to scrape BetKing odds...")
+        logger.info("Testing BetKing scraper...")
+        logger.info(f"Bonus for 10 selections: {calculate_betking_bonus(10) * 100:.1f}%")
+        logger.info(f"Bonus for 20 selections: {calculate_betking_bonus(20) * 100:.1f}%")
+        logger.info(f"Bonus for 40 selections: {calculate_betking_bonus(40) * 100:.1f}%")
+        logger.info("\nAttempting to scrape BetKing odds...")
         matches = await scrape_betking(max_matches=10)
-        print(f"Retrieved {len(matches)} matches")
+        logger.info(f"Retrieved {len(matches)} matches")
         if matches:
-            print(json.dumps(matches[0], indent=2))
+            logger.info(json.dumps(matches[0], indent=2))
         else:
-            print("No matches retrieved (API may be geo-blocked)")
-
+            logger.info("No matches retrieved (API may be geo-blocked)")
     asyncio.run(main())

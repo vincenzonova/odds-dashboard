@@ -8,6 +8,7 @@ Calls YaJuego's REST API directly:
 No browser needed â fast, lightweight, ~5-10s total.
 """
 
+import logging
 import asyncio
 import aiohttp
 import time
@@ -202,12 +203,12 @@ async def _fetch_league(session: aiohttp.ClientSession, league_name: str,
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status != 200:
-                print(f"  [YaJuego] {league_name}: HTTP {resp.status}")
+                logger.info(f"  [YaJuego] {league_name}: HTTP {resp.status}")
                 return []
             data = await resp.json()
 
             if data.get("R") != "OK":
-                print(f"  [YaJuego] {league_name}: R={data.get('R')}")
+                logger.info(f"  [YaJuego] {league_name}: R={data.get('R')}")
                 return []
 
             groups = data.get("D", {}).get("G", {})
@@ -232,16 +233,16 @@ async def _fetch_league(session: aiohttp.ClientSession, league_name: str,
                         })
 
             if events:
-                print(f"  [YaJuego] {league_name}: {len(events)} events")
+                logger.info(f"  [YaJuego] {league_name}: {len(events)} events")
             else:
-                print(f"  [YaJuego] {league_name}: 0 events")
+                logger.info(f"  [YaJuego] {league_name}: 0 events")
             return events
 
     except asyncio.TimeoutError:
-        print(f"  [YaJuego] {league_name}: timeout")
+        logger.warning(f"  [YaJuego] {league_name}: timeout")
         return []
     except Exception as e:
-        print(f"  [YaJuego] {league_name} error: {e}")
+        logger.error(f"  [YaJuego] {league_name} error: {e}")
         return []
 
 
@@ -278,11 +279,14 @@ async def scrape_yajuego(max_matches: int = 50, days: int = 7) -> list[dict]:
                         })
 
     elapsed = time.time() - start_time
-    print(f"  [YaJuego] Done â {len(results)} matches in {elapsed:.1f}s")
+    logger.info(f"  [YaJuego] Done â {len(results)} matches in {elapsed:.1f}s")
     return results
 
 
 if __name__ == "__main__":
     import json
+
+logger = logging.getLogger(__name__)
+
     data = asyncio.run(scrape_yajuego(max_matches=10))
-    print(json.dumps(data, indent=2))
+    logger.info(json.dumps(data, indent=2))

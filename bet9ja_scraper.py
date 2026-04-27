@@ -2,6 +2,7 @@
 Bet9ja Scraper — uses the sports.bet9ja.com JSON API.
 No browser automation needed — just plain HTTP requests.
 """
+import logging
 import asyncio
 import aiohttp
 from datetime import datetime, timedelta
@@ -97,8 +98,7 @@ async def scrape_bet9ja(max_matches: int = 50, days: int = 2) -> list[dict]:
             async with session.get("https://sports.bet9ja.com", timeout=aiohttp.ClientTimeout(total=15)):
                 pass
         except Exception as e:
-            print(f"  [Bet9ja] Session init warning: {e}")
-
+            logger.info(f"  [Bet9ja] Session init warning: {e}")
         for league_name, group_id in LEAGUE_IDS.items():
 
             params = {
@@ -109,27 +109,27 @@ async def scrape_bet9ja(max_matches: int = 50, days: int = 2) -> list[dict]:
             }
 
             try:
-                print(f"  [Bet9ja] Fetching {league_name} (GROUPID={group_id})...")
+                logger.info(f"  [Bet9ja] Fetching {league_name} (GROUPID={group_id})...")
                 async with session.get(
                     BET9JA_API,
                     params=params,
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     if resp.status != 200:
-                        print(f"  [Bet9ja] {league_name}: HTTP {resp.status}")
+                        logger.info(f"  [Bet9ja] {league_name}: HTTP {resp.status}")
                         continue
 
                     data = await resp.json()
 
                     if data.get("R") != "OK":
-                        print(f"  [Bet9ja] {league_name}: API returned {data.get('R')}")
+                        logger.info(f"  [Bet9ja] {league_name}: API returned {data.get('R')}")
                         continue
 
                     events = data.get("D", {}).get("E", [])
                     added = 0
                     if events:
-                        print(f"  [Bet9ja] Sample keys: {list(events[0].keys())}")
-                        print(f"  [Bet9ja] DA={events[0].get('DA','?')} BP={events[0].get('BP','?')}")
+                        logger.info(f"  [Bet9ja] Sample keys: {list(events[0].keys())}")
+                        logger.info(f"  [Bet9ja] DA={events[0].get('DA','?')} BP={events[0].get('BP','?')}")
                     for ev in events:
                         parsed = _parse_event(ev, league_name)
                         # Filter by date range (lenient: keep events if date can't be parsed)
@@ -151,20 +151,22 @@ async def scrape_bet9ja(max_matches: int = 50, days: int = 2) -> list[dict]:
                             results.append(parsed)
                             added += 1
    
-                    print(f"  [Bet9ja] {league_name}: +{added} matches")
-
+                    logger.info(f"  [Bet9ja] {league_name}: +{added} matches")
             except asyncio.TimeoutError:
-                print(f"  [Bet9ja] {league_name}: timeout")
+                logger.warning(f"  [Bet9ja] {league_name}: timeout")
                 continue
             except Exception as e:
-                print(f"  [Bet9ja] {league_name} error: {e}")
+                logger.error(f"  [Bet9ja] {league_name} error: {e}")
                 continue
 
-    print(f"  [Bet9ja] Done — {len(results)} matches total")
+    logger.info(f"  [Bet9ja] Done — {len(results)} matches total")
     return results[:max_matches]
 
 
 if __name__ == "__main__":
     import json
+
+logger = logging.getLogger(__name__)
+
     data = asyncio.run(scrape_bet9ja(max_matches=10))
-    print(json.dumps(data, indent=2))
+    logger.info(json.dumps(data, indent=2))

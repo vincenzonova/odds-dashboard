@@ -9,6 +9,7 @@ Uses Betfair's official Exchange API directly:
 Free delayed key: unlimited requests, 1-180s delay (fine for comparison).
 """
 
+import logging
 import asyncio
 import aiohttp
 import os
@@ -169,14 +170,14 @@ async def _betfair_login(session: aiohttp.ClientSession) -> str:
             result = await resp.json()
             if result.get("status") == "SUCCESS":
                 token = result.get("token", "")
-                print(f"  [Betfair] Login successful")
+                logger.info(f"  [Betfair] Login successful")
                 return token
             else:
                 error = result.get("error", "Unknown error")
-                print(f"  [Betfair] Login failed: {error}")
+                logger.error(f"  [Betfair] Login failed: {error}")
                 return ""
     except Exception as e:
-        print(f"  [Betfair] Login error: {e}")
+        logger.error(f"  [Betfair] Login error: {e}")
         return ""
 
 
@@ -201,11 +202,11 @@ async def _betfair_api_call(session: aiohttp.ClientSession, token: str,
         ) as resp:
             if resp.status != 200:
                 text = await resp.text()
-                print(f"  [Betfair] API {method}: HTTP {resp.status} - {text[:200]}")
+                logger.info(f"  [Betfair] API {method}: HTTP {resp.status} - {text[:200]}")
                 return {}
             return await resp.json()
     except Exception as e:
-        print(f"  [Betfair] API {method} error: {e}")
+        logger.error(f"  [Betfair] API {method} error: {e}")
         return {}
 
 
@@ -248,12 +249,12 @@ async def _fetch_competition_markets(session: aiohttp.ClientSession, token: str,
         ) as resp:
             if resp.status != 200:
                 text = await resp.text()
-                print(f"  [Betfair] {league_name} catalogue: HTTP {resp.status}")
+                logger.info(f"  [Betfair] {league_name} catalogue: HTTP {resp.status}")
                 return []
             markets = await resp.json()
 
             if not isinstance(markets, list) or not markets:
-                print(f"  [Betfair] {league_name}: 0 markets")
+                logger.info(f"  [Betfair] {league_name}: 0 markets")
                 return []
 
             # Now get prices for all these markets
@@ -272,7 +273,7 @@ async def _fetch_competition_markets(session: aiohttp.ClientSession, token: str,
                 timeout=aiohttp.ClientTimeout(total=20),
             ) as resp2:
                 if resp2.status != 200:
-                    print(f"  [Betfair] {league_name} prices: HTTP {resp2.status}")
+                    logger.info(f"  [Betfair] {league_name} prices: HTTP {resp2.status}")
                     return []
                 books = await resp2.json()
 
@@ -335,16 +336,16 @@ async def _fetch_competition_markets(session: aiohttp.ClientSession, token: str,
                     })
 
             if events:
-                print(f"  [Betfair] {league_name}: {len(events)} events")
+                logger.info(f"  [Betfair] {league_name}: {len(events)} events")
             else:
-                print(f"  [Betfair] {league_name}: 0 events")
+                logger.info(f"  [Betfair] {league_name}: 0 events")
             return events
 
     except asyncio.TimeoutError:
-        print(f"  [Betfair] {league_name}: timeout")
+        logger.warning(f"  [Betfair] {league_name}: timeout")
         return []
     except Exception as e:
-        print(f"  [Betfair] {league_name} error: {e}")
+        logger.error(f"  [Betfair] {league_name} error: {e}")
         return []
 
 
@@ -355,7 +356,7 @@ async def scrape_betfair(max_matches: int = 50, days: int = 7) -> list[dict]:
     seen = set()
 
     if not BETFAIR_USERNAME or not BETFAIR_PASSWORD or not BETFAIR_APP_KEY:
-        print("  [Betfair] Missing credentials (BETFAIR_USERNAME/PASSWORD/APP_KEY) â skipping")
+        logger.info("  [Betfair] Missing credentials (BETFAIR_USERNAME/PASSWORD/APP_KEY) â skipping")
         return results
 
     async with aiohttp.ClientSession() as session:
@@ -390,11 +391,14 @@ async def scrape_betfair(max_matches: int = 50, days: int = 7) -> list[dict]:
                         })
 
     elapsed = time.time() - start_time
-    print(f"  [Betfair] Done â {len(results)} matches in {elapsed:.1f}s")
+    logger.info(f"  [Betfair] Done â {len(results)} matches in {elapsed:.1f}s")
     return results
 
 
 if __name__ == "__main__":
     import json
+
+logger = logging.getLogger(__name__)
+
     data = asyncio.run(scrape_betfair(max_matches=10))
-    print(json.dumps(data, indent=2))
+    logger.info(json.dumps(data, indent=2))

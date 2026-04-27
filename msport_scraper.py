@@ -24,6 +24,7 @@ DOM structure:
   - Best Odds: .odds may contain .reference-odds child element to remove
 """
 
+import logging
 import asyncio
 import traceback
 from datetime import datetime, timedelta
@@ -244,7 +245,7 @@ async def _load_and_extract(page, url: str, date_str: str, timeout_ms: int = 250
         raw_matches = await page.evaluate(JS_EXTRACT_ALL)
         return raw_matches
     except Exception as e:
-        print(f"  [MSport] Error loading {url}: {e}")
+        logger.error(f"  [MSport] Error loading {url}: {e}")
         return []
 
 
@@ -292,7 +293,7 @@ async def _switch_ou_line(page, target_line: str) -> bool:
                 pass
 
         if not clicked:
-            print(f"  [MSport] Could not find dropdown option for {target_line}")
+            logger.info(f"  [MSport] Could not find dropdown option for {target_line}")
             # Close dropdown by clicking elsewhere
             await page.click('body', position={"x": 10, "y": 10})
             await page.wait_for_timeout(500)
@@ -300,11 +301,11 @@ async def _switch_ou_line(page, target_line: str) -> bool:
 
         # Wait for odds to update in DOM
         await page.wait_for_timeout(2500)
-        print(f"  [MSport] Switched O/U line to {target_line}")
+        logger.info(f"  [MSport] Switched O/U line to {target_line}")
         return True
 
     except Exception as e:
-        print(f"  [MSport] Could not switch to O/U {target_line}: {e}")
+        logger.info(f"  [MSport] Could not switch to O/U {target_line}: {e}")
         try:
             await page.click('body', position={"x": 10, "y": 10})
             await page.wait_for_timeout(500)
@@ -331,7 +332,7 @@ async def _extract_ou_after_switch(page, target_line: str) -> list:
                 })
         return results
     except Exception as e:
-        print(f"  [MSport] Error extracting O/U {target_line}: {e}")
+        logger.error(f"  [MSport] Error extracting O/U {target_line}: {e}")
         return []
 
 
@@ -365,7 +366,7 @@ async def _extract_dc(page, url: str, date_str: str) -> list:
                 })
         return results
     except Exception as e:
-        print(f"  [MSport] Error extracting DC for {date_str}: {e}")
+        logger.error(f"  [MSport] Error extracting DC for {date_str}: {e}")
         return []
 
 
@@ -382,19 +383,19 @@ async def _scrape_date(page, date_str: str, is_today: bool, seen: set, max_match
 
     try:
         # ===== PASS 1: Default page -> 1X2 + default O/U =====
-        print(f"  [MSport] Loading {date_str} (Pass 1: 1X2 + O/U)...")
+        logger.info(f"  [MSport] Loading {date_str} (Pass 1: 1X2 + O/U)...")
         raw_matches = await _load_and_extract(page, url, date_str)
 
         # Retry strategy for today
         if not raw_matches and is_today:
-            print(f"  [MSport] Retrying {date_str} without date parameter...")
+            logger.warning(f"  [MSport] Retrying {date_str} without date parameter...")
             url_no_date = f"{MSPORT_BASE}?t={TOURNAMENT_FILTER}"
             raw_matches = await _load_and_extract(page, url_no_date, date_str, timeout_ms=30000)
             if raw_matches:
                 url = url_no_date
 
         if not raw_matches and is_today:
-            print(f"  [MSport] Retrying {date_str} with individual tournament URLs...")
+            logger.warning(f"  [MSport] Retrying {date_str} with individual tournament URLs...")
             for league_name, tid in TOURNAMENT_IDS.items():
                 url_single = f"{MSPORT_BASE}?d=d-{date_str}&t={tid}"
                 single_matches = await _load_and_extract(page, url_single, date_str, timeout_ms=20000)
@@ -402,11 +403,10 @@ async def _scrape_date(page, date_str: str, is_today: bool, seen: set, max_match
                     raw_matches.extend(single_matches)
 
         if not raw_matches:
-            print(f"  [MSport] No matches found for {date_str}")
+            logger.info(f"  [MSport] No matches found for {date_str}")
             return results
 
-        print(f"  [MSport] {date_str}: found {len(raw_matches)} events")
-
+        logger.info(f"  [MSport] {date_str}: found {len(raw_matches)} events")
         # Build match map keyed by "home-away" for merging across passes
         match_map = {}
         for raw in raw_matches:
@@ -424,12 +424,11 @@ async def _scrape_date(page, date_str: str, is_today: bool, seen: set, max_match
                 match_map[key] = match_dict
 
         matched_1x2 = sum(1 for m in match_map.values() if "1X2" in m["odds"])
-        print(f"  [MSport] {date_str} Pass 1: {matched_1x2} with 1X2")
-
+        logger.info(f"  [MSport] {date_str} Pass 1: {matched_1x2} with 1X2")
         # ===== PASS 2: Switch to O/U 2.5 =====
         need_ou25 = [k for k, m in match_map.items() if "O/U 2.5" not in m["odds"]]
         if need_ou25:
-            print(f"  [MSport] {date_str} Pass 2: Switching to O/U 2.5 ({len(need_ou25)} need it)...")
+            logger.info(f"  [MSport] {date_str} Pass 2: Switching to O/U 2.5 ({len(need_ou25)} need it)...")
             if await _switch_ou_line(page, "2.5"):
                 ou25_data = await _extract_ou_after_switch(page, "2.5")
                 merged_25 = 0
@@ -441,14 +440,13 @@ async def _scrape_date(page, date_str: str, is_today: bool, seen: set, max_match
                             "Under": od["under"],
                         }
                         merged_25 += 1
-                print(f"  [MSport] {date_str} Pass 2: merged O/U 2.5 for {merged_25} matches")
+                logger.info(f"  [MSport] {date_str} Pass 2: merged O/U 2.5 for {merged_25} matches")
         else:
-            print(f"  [MSport] {date_str} Pass 2: all matches already have O/U 2.5, skipping")
-
+            logger.info(f"  [MSport] {date_str} Pass 2: all matches already have O/U 2.5, skipping")
         # ===== PASS 3: Switch to O/U 1.5 =====
         need_ou15 = [k for k, m in match_map.items() if "O/U 1.5" not in m["odds"]]
         if need_ou15:
-            print(f"  [MSport] {date_str} Pass 3: Switching to O/U 1.5 ({len(need_ou15)} need it)...")
+            logger.info(f"  [MSport] {date_str} Pass 3: Switching to O/U 1.5 ({len(need_ou15)} need it)...")
             if await _switch_ou_line(page, "1.5"):
                 ou15_data = await _extract_ou_after_switch(page, "1.5")
                 merged_15 = 0
@@ -460,12 +458,11 @@ async def _scrape_date(page, date_str: str, is_today: bool, seen: set, max_match
                             "Under": od["under"],
                         }
                         merged_15 += 1
-                print(f"  [MSport] {date_str} Pass 3: merged O/U 1.5 for {merged_15} matches")
+                logger.info(f"  [MSport] {date_str} Pass 3: merged O/U 1.5 for {merged_15} matches")
         else:
-            print(f"  [MSport] {date_str} Pass 3: all matches already have O/U 1.5, skipping")
-
+            logger.info(f"  [MSport] {date_str} Pass 3: all matches already have O/U 1.5, skipping")
         # ===== PASS 4: Double Chance via &mId=10 =====
-        print(f"  [MSport] {date_str} Pass 4: Loading Double Chance (mId=10)...")
+        logger.info(f"  [MSport] {date_str} Pass 4: Loading Double Chance (mId=10)...")
         dc_url = f"{url}&mId=10"
         dc_data = await _extract_dc(page, dc_url, date_str)
         merged_dc = 0
@@ -478,15 +475,12 @@ async def _scrape_date(page, date_str: str, is_today: bool, seen: set, max_match
                     "X2": dc["X2"],
                 }
                 merged_dc += 1
-        print(f"  [MSport] {date_str} Pass 4: merged DC for {merged_dc} matches")
-
+        logger.info(f"  [MSport] {date_str} Pass 4: merged DC for {merged_dc} matches")
         results = list(match_map.values())
         total_markets = sum(len(m["odds"]) for m in results)
-        print(f"  [MSport] {date_str}: {len(results)} matches, {total_markets} total market slots")
-
+        logger.info(f"  [MSport] {date_str}: {len(results)} matches, {total_markets} total market slots")
     except Exception as e:
-        print(f"  [MSport] Error scraping {date_str}: {e}")
-
+        logger.error(f"  [MSport] Error scraping {date_str}: {e}")
     return results
 
 
@@ -559,17 +553,18 @@ async def _scrape_msport_once(max_matches: int = 200, days: int = 2) -> list:
                 await browser.close()
             except Exception:
                 pass
-    print(f"  [MSport] Done - {len(results)} matches total")
+    logger.info(f"  [MSport] Done - {len(results)} matches total")
     return results
 
 
 async def main():
     """Main execution function."""
     import json
+
+logger = logging.getLogger(__name__)
+
     matches = await scrape_msport(max_matches=200)
-    print(json.dumps(matches, indent=2))
-
-
+    logger.info(json.dumps(matches, indent=2))
 async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
     """Wrapper with automatic retry logic for browser crash resilience."""
     max_retries = 3
@@ -577,12 +572,12 @@ async def scrape_msport(max_matches: int = 200, days: int = 2) -> list:
         try:
             return await _scrape_msport_once(max_matches=max_matches, days=days)
         except Exception as e:
-            print(f"  [MSport] Attempt {attempt}/{max_retries} failed: {e}")
+            logger.error(f"  [MSport] Attempt {attempt}/{max_retries} failed: {e}")
             if attempt < max_retries:
-                print(f"  [MSport] Retrying in 5 seconds...")
+                logger.warning(f"  [MSport] Retrying in 5 seconds...")
                 await asyncio.sleep(5)
             else:
-                print(f"  [MSport] All {max_retries} attempts failed")
+                logger.error(f"  [MSport] All {max_retries} attempts failed")
                 traceback.print_exc()
                 return []
 
