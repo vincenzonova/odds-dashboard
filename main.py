@@ -242,7 +242,10 @@ async def do_refresh():
                 MAX_MATCHES, max(SCRAPE_DAYS, MSPORT_MIN_DAYS),
                 SCRAPER_TIMEOUTS.get("MSport", DEFAULT_SCRAPER_TIMEOUT),
             )
-            return [r1, r2]
+            return [
+                {"bookmaker": "SportyBet", "data": r1, "error": None},
+                {"bookmaker": "MSport", "data": r2, "error": None},
+            ]
 
         # API scrapers (Bet9ja, YaJuego) run in parallel with sequential Playwright scrapers
         bet9ja_result, yajuego_result, playwright_results = await asyncio.gather(
