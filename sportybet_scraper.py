@@ -15,6 +15,9 @@ import traceback
 from playwright.async_api import async_playwright
 from difflib import SequenceMatcher
 
+logger = logging.getLogger(__name__)
+
+
 
 SPORTYBET_BASE = "https://www.sportybet.com/ng/sport/football"
 
@@ -440,9 +443,6 @@ async def scrape_sportybet(max_matches: int = 50, days: int = 2) -> list[dict]:
 
 if __name__ == "__main__":
     import json
-
-logger = logging.getLogger(__name__)
-
 def _kill_stale_chromium():
     """Kill lingering Chromium processes to prevent thread exhaustion."""
     try:
