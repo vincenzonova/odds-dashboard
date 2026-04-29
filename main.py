@@ -217,6 +217,9 @@ async def safe_scrape(bookmaker_name: str, scrape_func, max_matches: int = MAX_M
 
 async def do_refresh():
     """Refresh odds from all 5 bookmakers concurrently."""
+    if cache.get("is_refreshing"):
+        logger.warning("Skipping refresh — previous cycle still running")
+        return
     cache["status"] = "Refreshing..."
     cache["is_refreshing"] = True
     try:
@@ -225,8 +228,10 @@ async def do_refresh():
         # to avoid memory pressure from 3+ concurrent headless browsers
         async def _run_playwright_scrapers():
             """Run Playwright scrapers in isolated subprocesses to prevent thread leaks."""
+            logger.info("Starting Playwright scrapers (subprocess isolation)...")
             kill_stale_chromium()
             loop = asyncio.get_event_loop()
+            logger.info("Launching SportyBet subprocess (timeout=%ss)...", SCRAPER_TIMEOUTS.get("SportyBet", DEFAULT_SCRAPER_TIMEOUT))
             r1 = await loop.run_in_executor(
                 None,
                 run_scraper_subprocess,
@@ -234,7 +239,9 @@ async def do_refresh():
                 MAX_MATCHES, SCRAPE_DAYS,
                 SCRAPER_TIMEOUTS.get("SportyBet", DEFAULT_SCRAPER_TIMEOUT),
             )
+            logger.info("SportyBet subprocess done: %d matches", len(r1))
             kill_stale_chromium()
+            logger.info("Launching MSport subprocess (timeout=%ss)...", SCRAPER_TIMEOUTS.get("MSport", DEFAULT_SCRAPER_TIMEOUT))
             r2 = await loop.run_in_executor(
                 None,
                 run_scraper_subprocess,
@@ -242,6 +249,8 @@ async def do_refresh():
                 MAX_MATCHES, max(SCRAPE_DAYS, MSPORT_MIN_DAYS),
                 SCRAPER_TIMEOUTS.get("MSport", DEFAULT_SCRAPER_TIMEOUT),
             )
+            logger.info("MSport subprocess done: %d matches", len(r2))
+            logger.info("Playwright scrapers complete: SportyBet=%d, MSport=%d", len(r1), len(r2))
             return [
                 {"bookmaker": "SportyBet", "data": r1, "error": None},
                 {"bookmaker": "MSport", "data": r2, "error": None},
@@ -356,7 +365,7 @@ async def lifespan(app: FastAPI):
     )
     init_db()
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(do_refresh, "interval", minutes=REFRESH_INTERVAL_MINUTES)
+    scheduler.add_job(do_refresh, "interval", minutes=REFRESH_INTERVAL_MINUTES, max_instances=1, coalesce=True)
     scheduler.start()
     # Initial refresh in background (non-blocking so server starts immediately)
     asyncio.create_task(do_refresh())
