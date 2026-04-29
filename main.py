@@ -837,6 +837,10 @@ asyncio.run(main())
         if isinstance(data, dict) and "error" in data:
             logger.error(f"{scraper_module}.{func_name} error: {data['error']}")
             return []
+        if len(data) == 0 and proc.stderr.strip():
+            logger.warning(f"{scraper_module}.{func_name} returned 0 matches. stderr: {proc.stderr[-1000:]}")
+        elif proc.stderr.strip():
+            logger.info(f"{scraper_module}.{func_name} stderr: {proc.stderr[-500:]}")
         logger.info(f"{scraper_module}.{func_name} returned {len(data)} matches")
         return data
     except subprocess.TimeoutExpired:
